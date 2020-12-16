@@ -1,0 +1,16 @@
+project: ${project_id}
+serviceAccount: ${service_account}
+pubsub:
+  topic: ${pubsub_topic}
+  subscription: ${pubsub_subscription}
+storage:
+  url: ${bucket_url}
+  config: ${config_folder_link}
+  logs: ${logs_folder_link}
+  connections: ${connections_folder_link}
+additionalMetadata:
+%{ for key in keys(additional_metadata) ~}
+-item:
+  key: ${key}
+  value: ${additional_metadata[key]}
+%{ endfor ~}

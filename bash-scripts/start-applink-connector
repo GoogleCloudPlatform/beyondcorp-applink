@@ -1,0 +1,173 @@
+#!/bin/bash
+#
+## Copyright 2020 Google LLC
+##
+## Licensed under the Apache License, Version 2.0 (the "License");
+## you may not use this file except in compliance with the License.
+## You may obtain a copy of the License at
+##
+##      http://www.apache.org/licenses/LICENSE-2.0
+##
+## Unless required by applicable law or agreed to in writing, software
+## distributed under the License is distributed on an "AS IS" BASIS,
+## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+## See the License for the specific language governing permissions and
+## limitations under the License.
+#
+#
+# Configures the Connector VM and starts the Connector container
+
+set -euo pipefail
+
+readonly APP_CONNECTION_FILE='app-connection'
+CONNECTOR_IMAGE='gcr.io/cloud-applink-external-release/applink_connector'
+GCS_CONNECTION_OBJECT_ID=''
+CONTAINER_NAME='bce-applink-connector'
+CONTAINER_NETWORK='host'
+CONTAINER_PORT_MAPPING=''
+SERVICE_ACCOUNT=''
+
+function usage () {
+  cat << USAGE
+  Configure and start Applink Connector
+
+  Usage: $0 -c <connection_gcs_uri> [-i <image>] [-l <container_name>]
+           [-n <network>] [-p <port_mapping>] [-s <service_account>]
+
+  -c <connection_gcs_uri>  The Google Cloud Storage URI for the connection
+                           file object (gs://bucket-name/object-name)
+  -h                       Print this help message.
+  -i <image>               The Google Container Registry path of the
+                           connector container image
+                           (gcr.io/project-id/image-name)
+                           Default is gcr.io/cloud-applink-external-release/applink_connector:latest
+                           if not specified.
+  -l <container_name>      The name for the connector Docker container. Default
+                           name is bce-applink-connector if not specified.
+  -n <network>             The name of the network to connect the Docker
+                           container to. Default is host network if not specified.
+  -p <port_mapping>        The port-mapping scheme for the Docker container
+                           (host_port:container_port)
+  -s <service_account>     The email of the service account to be
+                           impersonated
+                           (sa-name@project-id.iam.gserviceaccount.com)
+
+USAGE
+}
+
+# Parse command-line flags
+while getopts 'c:hi:l:n:p:s:' opt; do
+  case "${opt}" in
+    c) GCS_CONNECTION_OBJECT_ID="${OPTARG}" ;;
+    h)
+      usage
+      exit 0
+      ;;
+    i) CONNECTOR_IMAGE="${OPTARG}" ;;
+    l) CONTAINER_NAME="${OPTARG}"  ;;
+    n) CONTAINER_NETWORK="${OPTARG}"  ;;
+    p) CONTAINER_PORT_MAPPING="${OPTARG}" ;;
+    s) SERVICE_ACCOUNT="${OPTARG}" ;;
+    ?)
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Make sure GCS_CONNECTION_OBJECT_ID was set and has valid format
+if [[ ! "${GCS_CONNECTION_OBJECT_ID}" =~ ^gs:// ]]; then
+  echo 'Invalid GCS URI format for <connection_gcs_uri>' >&2
+  usage >&2
+  exit 1
+fi
+# Perform a service account email format check
+readonly GCP_ID_REGEX='[a-z][-a-z0-9]{4,28}[a-z0-9]'
+readonly SERVICE_ACCT_EMAIL_REGEX="^${GCP_ID_REGEX}@${GCP_ID_REGEX}\.iam\.gserviceaccount\.com$"
+if [[ -n "${SERVICE_ACCOUNT}" ]] &&
+   [[ ! "${SERVICE_ACCOUNT}" =~ ${SERVICE_ACCT_EMAIL_REGEX} ]]; then
+  echo 'Invalid email format for <service_account>' >&2
+  usage >&2
+  exit 1
+fi
+
+readonly GCS_CONNECTION_OBJECT_ID
+readonly CONNECTOR_IMAGE
+readonly CONTAINER_NAME
+readonly CONTAINER_NETWORK
+readonly CONTAINER_PORT_MAPPING
+readonly SERVICE_ACCOUNT
+
+echo "Run '$0 -h' for help"
+
+# Make sure gcloud, gsutil, and docker are installed
+echo
+echo 'Checking dependencies...'
+echo
+gcloud version || { echo "Please install Google Cloud SDK on this machine \
+  (https://cloud.google.com/sdk/docs/install)"; exit 1; }
+echo
+gsutil version # should be installed automatically with gcloud
+echo
+docker version || { echo "Please install Docker Engine on this machine \
+  (https://docs.docker.com/engine/install/)"; exit 1; }
+
+# Do some network diagnostics
+#
+# grep error checking is a temporary solution until b/171724420 is fixed for
+# gcloud
+echo
+gcloud info --run-diagnostics 2>&1 | tee >(cat >&2) | grep -i 'error' >/dev/null && \
+  { echo; echo 'Please check the network and run this script again'; exit 1; }
+
+# Update Application Default Credentials for gcloud
+gcloud auth login --update-adc
+# Register gcloud as a Docker credential helper
+gcloud auth configure-docker
+
+# Fetch Docker container image from registry
+docker pull "${CONNECTOR_IMAGE}"
+
+# Create a directory for storing Applink configurations that will be shared as a
+# volume with the connector Docker container
+if [[ ! -d /etc/applink/config ]]; then
+  sudo mkdir -p /etc/applink/config
+fi
+if [[ ! -d /etc/applink/connections ]]; then
+  sudo mkdir -p /etc/applink/connections
+fi
+
+# Copy Application Default Credentials to Applink configurations directory
+sudo cp ~/.config/gcloud/application_default_credentials.json /etc/applink/config/
+
+# Use gsutil to fetch the connection configuration file from GCS and move it
+# into the Applink configurations directory
+gsutil cp "${GCS_CONNECTION_OBJECT_ID}" "${APP_CONNECTION_FILE}"
+sudo mv "${APP_CONNECTION_FILE}" /etc/applink/connections
+
+docker_flags=(
+  -d
+  --read-only
+  -v /etc/applink:/applink
+  -e GOOGLE_APPLICATION_CREDENTIALS=/applink/config/application_default_credentials.json
+  --network="${CONTAINER_NETWORK}"
+)
+
+if [[ -n "${CONTAINER_NAME}" ]]; then
+  docker_flags+=(--name="${CONTAINER_NAME}")
+fi
+
+if [[ -n "${CONTAINER_PORT_MAPPING}" ]]; then
+  docker_flags+=(--publish="${CONTAINER_PORT_MAPPING}")
+fi
+
+connector_flags=(
+  --connection_file_path=/applink/connections/"${APP_CONNECTION_FILE}"
+)
+
+if [[ -n "${SERVICE_ACCOUNT}" ]]; then
+  connector_flags+=(--impersonate_service_account="${SERVICE_ACCOUNT}")
+fi
+
+# Start the connector container
+docker run "${docker_flags[@]}" "${CONNECTOR_IMAGE}" "${connector_flags[@]}"

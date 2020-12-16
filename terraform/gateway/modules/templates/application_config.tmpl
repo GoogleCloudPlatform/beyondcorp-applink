@@ -1,0 +1,14 @@
+project: ${project_id}
+application: ${application}
+instanceGroupName: ${mig_name}
+appEndpoint: ${app_endpoint}
+tunnelsPerGateway: ${tunnels_per_gw}
+instances:
+%{ for instance in instances ~}
+- selfLink: ${instance}
+  project: ${project_id}
+  name: ${replace(instance,"/.*\\/zones\\/.*//","")}
+  zone: ${replace(replace(instance,"/.*\\/zones\\//",""),"/\\/instances\\/.*/","")}
+  interface: ${interface}
+  port: ${port}
+%{ endfor ~}
