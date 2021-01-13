@@ -19,7 +19,7 @@ connectivity to remote applications.
 
 [Prerequisites](#prerequisites)
 
-[Setup/Topology](#setup-topology)
+[Setup/Topology](#setuptopology)
 
 [Step-by-Step Deployment](#step-by-step-deployment)
 

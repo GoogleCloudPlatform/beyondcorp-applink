@@ -23,13 +23,15 @@ Modular BCE Applink Connectors for GCP.
     gcloud projects create [PROJECT_ID]
     gcloud beta billing projects link [PROJECT_ID] --billing-account=[ACCOUNT_ID]
     ```
-2.  Dry run of actuating resources using terraform
+2.  Run ```terraform init``` to install all modules
+
+3.  Dry run of actuating resources using terraform
     ```
     terraform plan -var-file=[FILEPATH]
     ```
     NOTE: If service account impersonation is needed, the impersonating accounts must be created prior to this step.
 
-3.  Actuate resources using terraform
+4.  Actuate resources using terraform
     ```
     terraform apply -var-file=[FILEPATH]
     ```
