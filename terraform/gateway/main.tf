@@ -136,7 +136,7 @@ resource "google_compute_backend_service" "default" {
   name     = "${local.prefix}-${each.key}-be"
 
   port_name   = local.service_port_name
-  protocol    = "HTTP"
+  protocol    = var.application_map[each.key].protocol
   timeout_sec = var.application_map[each.key].backend_service_timeout
   description = lookup(each.value, "description", null)
   health_checks = lookup(

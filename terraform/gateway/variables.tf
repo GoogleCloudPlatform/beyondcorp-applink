@@ -51,6 +51,7 @@ variable "application_map" {
       app_endpoint = string
       # Map from connector keys to it's service account details.
       connector_key_service_account_map = map(object({ service_account_email : string }))
+      protocol                          = string
       # IAP config for the backend service.
       iap_config = object({
         enable               = bool

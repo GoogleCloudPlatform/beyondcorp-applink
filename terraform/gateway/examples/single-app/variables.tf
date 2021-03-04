@@ -80,6 +80,12 @@ variable "backend_service_timeout" {
   default     = 10
 }
 
+variable "backend_service_protocol" {
+  description = "The protocol BackendService uses to communicate with backends. Possible values are HTTP, HTTPS."
+  type        = string
+  default     = "HTTPS"
+}
+
 variable "enable_iap" {
   description = "If true creates a internal OAuth 2 client and enables Identity-Aware Proxy (IAP) for the GCP backend service representing the application."
   type        = bool
