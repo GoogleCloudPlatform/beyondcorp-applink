@@ -44,6 +44,7 @@ module "gateway" {
       backend_service_timeout           = var.backend_service_timeout
       app_endpoint                      = var.app_endpoint
       connector_key_service_account_map = var.connector_info
+      protocol                          = var.backend_service_protocol
       iap_config = {
         enable               = var.enable_iap
         oauth2_client_id     = var.enable_iap ? google_iap_client.project_client[0].client_id : ""
