@@ -47,12 +47,6 @@ in the Private Preview sign-up form**
         the [Gateway](terraform-config.md#applink-gateway) step (gs://...)\]
         **Required**
 
-    *   -i \[GCR path of the BCE Applink connector image
-        (gcr.io/projectid/image)\] **Optional**
-
-        *   If this flag is not specified, the script will use the image tagged
-            *latest* from the *cloud-applink-external-release* registry in GCR
-
     *   -l \[The name for the connector Docker container\] **Optional**
 
     *   -n \[The name of the network to connect to\] **Optional**
@@ -72,7 +66,6 @@ Example:
 ```
 $ ./start-applink-connector \
 -c gs://921727625615-connector-c1/connections/apache \
--i gcr.io/applinktest-281120/applink_connector:latest \
 -s connector-c1-sa@brettmeehan-applink.iam.gserviceaccount.com
 ```
 
