@@ -23,6 +23,8 @@ connectivity to remote applications.
 
 [Step-by-Step Deployment](#step-by-step-deployment)
 
+[Help](#help)
+
 ## Overview
 
 [Cloud Identity-Aware Proxy](https://cloud.google.com/iap/docs/concepts-overview)
@@ -129,3 +131,6 @@ minimal setup.
 3.  [Configure](terraform-config.md) your GCP project using Terraform scripts.
 4.  [Set up](connector-setup.md) the Connector VM.
 5.  [Publish](iap-lb-setup.md) application using Identity Aware Proxy.
+
+## Help
+[FAQs](faqs.md)

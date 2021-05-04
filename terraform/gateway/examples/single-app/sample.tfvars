@@ -9,6 +9,8 @@ app_endpoint = "10.128.0.15:80"
 
 dns_name = "myapp.myorg.com."
 
+backend_service_protocol = "HTTP"
+
 // Can be obtained using `gcloud alpha iap oauth-brands list --format="value(name)"`
 iap_brand_name = "projects/XXXXXXXXXXXX/brands/XXXXXXXXXXXX"
 
