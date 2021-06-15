@@ -47,6 +47,11 @@ in the Private Preview sign-up form**
         the [Gateway](terraform-config.md#applink-gateway) step (gs://...)\]
         **Required**
 
+    *   -f **Optional**
+
+        *   Set this flag to start a Fluentbit container alongside the
+	    connector.
+
     *   -l \[The name for the connector Docker container\] **Optional**
 
     *   -n \[The name of the network to connect to\] **Optional**
@@ -54,9 +59,11 @@ in the Private Preview sign-up form**
         *   The Docker container will connect to the host network by default.
 
     *   -s \[*service_account_email* from the
-        [Connector](terraform-config.md#applink-connector) step\] **Optional**
+        [Connector](terraform-config.md#applink-connector) step\]
 
-        *   Set this flag to enable service account impersonation
+        *   **Optional** if service account impersonation is desired.
+
+        *   **Required** if Fluentbit container is desired.
 
 *   To see all available options and usage, type `$ ./start-applink-connector
     -h`
@@ -67,6 +74,48 @@ Example:
 $ ./start-applink-connector \
 -c gs://921727625615-connector-c1/connections/apache \
 -s connector-c1-sa@brettmeehan-applink.iam.gserviceaccount.com
+```
+
+## Start Fluentbit Container (Optional)
+
+To start the Fluentbit container independently, follow the steps below. 
+The bash script for this step is located
+[here](bash-scripts/start-fluentbit).
+
+* Copy the bash script *start-fluentbit* to the Connector VM.
+
+* Run the bash script *start-fluentbit* with the following flags:
+	
+	* -c \[the path to the credentials file\] **Optional**  
+	  This is the credentials to be used by Fluentbit to connect to your
+	  Google Cloud project.
+
+	* -l \[the path to the folder where Docker container logs are stored\] 
+    **Optional**
+
+    *   -s \[*service_account_email* from the
+        [Connector](terraform-config.md#applink-connector) step\] **Required**
+
+* To see all available options and usage, type `$ ./start-fluentbit -h`
+
+Example:
+
+```
+$ ./start-fluentbit -s connector-c1-sa@brettmeehan-applink.iam.gserviceaccount.com
+```
+
+### Cloud Logging
+To filter gateway logs, use the following query:
+
+```
+resource.type="gce_instance"
+"applink_gw"
+```
+
+To filter connector logs, use the following query:
+
+```
+jsonPayload.attrs.tag = "beyondcorp.*"
 ```
 
 [Next: Publish application using Identity Aware Proxy](iap-lb-setup.md)

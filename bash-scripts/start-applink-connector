@@ -19,23 +19,28 @@
 
 set -euo pipefail
 
-readonly APP_CONNECTION_FILE='app-connection'
-CONNECTOR_IMAGE='gcr.io/cloud-applink-external-release/applink_connector'
+CONNECTOR_IMAGE='gcr.io/cloud-applink-external-release/applink_connector:unstable'
 GCS_CONNECTION_OBJECT_ID=''
-CONTAINER_NAME='bce-applink-connector'
+CONTAINER_NAME='beyondcorp-applink-connector'
 CONTAINER_NETWORK='host'
 CONTAINER_PORT_MAPPING=''
 SERVICE_ACCOUNT=''
+START_FLUENTBIT_CONTAINER=''
+readonly FLUENTBIT_SCRIPT='start-fluentbit'
+readonly FLUENBIT_SCRIPT_URL='https://raw.githubusercontent.com/GoogleCloudPlatform/beyondcorp-applink/unstable/bash-scripts/start-fluentbit'
 
 function usage () {
   cat << USAGE
-  Configure and start Applink Connector
 
+  Configure and start Applink Connector
+  
   Usage: $0 -c <connection_gcs_uri> [-i <image>] [-l <container_name>]
            [-n <network>] [-p <port_mapping>] [-s <service_account>]
-
+           
   -c <connection_gcs_uri>  The Google Cloud Storage URI for the connection
                            file object (gs://bucket-name/object-name)
+  -f                       Start a Fluentbit container alongside the connector
+                           Requires a service account to be specified.
   -h                       Print this help message.
   -i <image>               The Google Container Registry path of the
                            connector container image
@@ -51,14 +56,15 @@ function usage () {
   -s <service_account>     The email of the service account to be
                            impersonated
                            (sa-name@project-id.iam.gserviceaccount.com)
-
+                           
 USAGE
 }
 
 # Parse command-line flags
-while getopts 'c:hi:l:n:p:s:' opt; do
+while getopts 'c:fhi:l:n:p:s:' opt; do
   case "${opt}" in
     c) GCS_CONNECTION_OBJECT_ID="${OPTARG}" ;;
+    f) START_FLUENTBIT_CONTAINER='true' ;;
     h)
       usage
       exit 0
@@ -90,6 +96,12 @@ if [[ -n "${SERVICE_ACCOUNT}" ]] &&
   usage >&2
   exit 1
 fi
+# Check that a service account was specified if starting a Fluentbit container
+if [[ -z "${SERVICE_ACCOUNT}" ]] && [[ -n "${START_FLUENTBIT_CONTAINER}" ]]; then
+  echo 'Please specify a service account when trying to start Fluentbit' >&2
+  usage >&2
+  exit 
+fi
 
 readonly GCS_CONNECTION_OBJECT_ID
 readonly CONNECTOR_IMAGE
@@ -97,6 +109,7 @@ readonly CONTAINER_NAME
 readonly CONTAINER_NETWORK
 readonly CONTAINER_PORT_MAPPING
 readonly SERVICE_ACCOUNT
+readonly START_FLUENTBIT_CONTAINER
 
 echo "Run '$0 -h' for help"
 
@@ -120,8 +133,6 @@ echo
 gcloud info --run-diagnostics 2>&1 | tee >(cat >&2) | grep -i 'error' >/dev/null && \
   { echo; echo 'Please check the network and run this script again'; exit 1; }
 
-# Update Application Default Credentials for gcloud
-gcloud auth login --update-adc
 # Register gcloud as a Docker credential helper
 gcloud auth configure-docker
 
@@ -137,13 +148,26 @@ if [[ ! -d /etc/applink/connections ]]; then
   sudo mkdir -p /etc/applink/connections
 fi
 
-# Copy Application Default Credentials to Applink configurations directory
-sudo cp ~/.config/gcloud/application_default_credentials.json /etc/applink/config/
+# Start Fluentbit Container
+if [[ -n "${START_FLUENTBIT_CONTAINER}" ]]; then
+  if [[ ! -f "${FLUENTBIT_SCRIPT}" ]]; then
+    curl "${FLUENTBIT_SCRIPT_URL}" > "${FLUENTBIT_SCRIPT}"
+  fi
+  bash "${FLUENTBIT_SCRIPT}" -s "${SERVICE_ACCOUNT}"
+
+  # Service Account key is handled by the Fluentbit script.
+  sudo cp ~/.config/gcloud/${SERVICE_ACCOUNT}-key.json /etc/applink/config/application_default_credentials.json
+else
+  # Update Application Default Credentials for gcloud
+  gcloud auth login --update-adc
+
+  # Copy Application Default Credentials to Applink configurations directory
+  sudo cp ~/.config/gcloud/application_default_credentials.json /etc/applink/config/
+fi
 
 # Use gsutil to fetch the connection configuration file from GCS and move it
 # into the Applink configurations directory
-gsutil cp "${GCS_CONNECTION_OBJECT_ID}" "${APP_CONNECTION_FILE}"
-sudo mv "${APP_CONNECTION_FILE}" /etc/applink/connections
+sudo gsutil cp "${GCS_CONNECTION_OBJECT_ID}" /etc/applink/connections/
 
 docker_flags=(
   -d
@@ -151,6 +175,8 @@ docker_flags=(
   -v /etc/applink:/applink
   -e GOOGLE_APPLICATION_CREDENTIALS=/applink/config/application_default_credentials.json
   --network="${CONTAINER_NETWORK}"
+  --log-driver="json-file"
+  --log-opt tag="{{.Name}}"
 )
 
 if [[ -n "${CONTAINER_NAME}" ]]; then
@@ -162,10 +188,11 @@ if [[ -n "${CONTAINER_PORT_MAPPING}" ]]; then
 fi
 
 connector_flags=(
-  --connection_file_path=/applink/connections/"${APP_CONNECTION_FILE}"
+  --connection_directory=/applink/connections
+  --watch_connection_directory
 )
 
-if [[ -n "${SERVICE_ACCOUNT}" ]]; then
+if [[ -n "${SERVICE_ACCOUNT}" ]] && [[ -z "${START_FLUENTBIT_CONTAINER}" ]]; then
   connector_flags+=(--impersonate_service_account="${SERVICE_ACCOUNT}")
 fi
 
