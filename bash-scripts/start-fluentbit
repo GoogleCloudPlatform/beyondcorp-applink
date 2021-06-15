@@ -1,0 +1,105 @@
+#!/bin/bash
+#
+## Copyright 2021 Google LLC
+##
+## Licensed under the Apache License, Version 2.0 (the "License");
+## you may not use this file except in compliance with the License.
+## You may obtain a copy of the License at
+##
+##      http://www.apache.org/licenses/LICENSE-2.0
+##
+## Unless required by applicable law or agreed to in writing, software
+## distributed under the License is distributed on an "AS IS" BASIS,
+## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+## See the License for the specific language governing permissions and
+## limitations under the License.
+#
+#
+# Starts the Fluentbit container
+
+set -euo pipefail
+
+function usage () {
+  cat << USAGE
+  Start the Fluentbit container
+  Usage: $0 s <service_account> [-c <credentials_folder>] [-f <fluentbit_config_folder>]
+           [-i <image>] [-n <container_name> [-l <docker_logs_path>]
+  -c <credentials_folder>   The path to the folder where application_default_credentials.json
+                            is located.
+                            Default is ${HOME}/.config/gcloud
+  -i <image>                The Fluentbit image to use.
+                            Default is gcr.io/cloud-applink-external-release/logagent:stable
+  -h                        Print this help message.
+  -l <docker_logs_path>     The path where Docker container logs are stored.
+                            Default is /var/lib/docker/containers
+  -s <service_account>      The service account to use for authentication.
+USAGE
+}
+
+
+FLUENTBIT_IMAGE='gcr.io/cloud-applink-external-release/applink_logagent:unstable'
+CONTAINER_NAME='beyondcorp-fluentbit'
+CREDENTIALS_PATH="${HOME}/.config/gcloud"
+CONTAINER_LOGS_PATH='/var/lib/docker/containers'
+SERVICE_ACCOUNT=''
+
+readonly CONTAINER_CREDENTIALS_PATH='/credentials/credentials.json'
+
+while getopts 'c:hi:l:n:s:' opt; do
+  case "${opt}" in
+    c) CREDENTIALS_PATH="${OPTARG}" ;;
+    h)
+      usage
+      exit 0
+      ;;
+    i) FLUENTBIT_IMAGE="${OPTARG}";;
+    l) CONTAINER_LOGS_PATH="${OPTARG}";;
+    n) CONTAINER_NAME="${OPTARG}";;
+    s) SERVICE_ACCOUNT="${OPTARG}";;
+    ?)
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+# Check Service Account was specified
+if [[ -z "${SERVICE_ACCOUNT}" ]]; then
+  echo 'Please specify a service account' >&2
+  usage >&2
+  exit 1
+fi
+# Perform a service account email format check
+readonly GCP_ID_REGEX='[a-z][-a-z0-9]{4,28}[a-z0-9]'
+readonly SERVICE_ACCT_EMAIL_REGEX="^${GCP_ID_REGEX}@${GCP_ID_REGEX}\.iam\.gserviceaccount\.com$"
+if [[ -n "${SERVICE_ACCOUNT}" ]] &&
+   [[ ! "${SERVICE_ACCOUNT}" =~ ${SERVICE_ACCT_EMAIL_REGEX} ]]; then
+  echo 'Invalid email format for <service_account>' >&2
+  usage >&2
+  exit 1
+fi
+
+readonly FLUENTBIT_IMAGE
+readonly CONTAINER_NAME
+readonly CREDENTIALS_PATH
+readonly CONTAINER_LOGS_PATH
+readonly SERVICE_ACCOUNT
+
+readonly SERVICE_ACCOUNT_KEY="${CREDENTIALS_PATH}/${SERVICE_ACCOUNT}-key.json"
+# Check if a key for the service account already exists.
+if [[ ! -f "${SERVICE_ACCOUNT_KEY}" ]]; then
+  gcloud iam service-accounts keys create "${SERVICE_ACCOUNT_KEY}" --iam-account="${SERVICE_ACCOUNT}"
+fi
+
+# Fetch Docker container image from registry
+docker pull "${FLUENTBIT_IMAGE}"
+
+docker_flags=(
+  -d
+  -v "${SERVICE_ACCOUNT_KEY}":"${CONTAINER_CREDENTIALS_PATH}"
+  -v "${CONTAINER_LOGS_PATH}":/containers
+  --name "${CONTAINER_NAME}"
+)
+
+# Start the connector container
+docker run "${docker_flags[@]}" "${FLUENTBIT_IMAGE}"
