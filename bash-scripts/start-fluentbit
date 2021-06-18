@@ -39,7 +39,7 @@ USAGE
 
 
 # TODO(ramosalex) Change FLUENTBIT_IMAGE to reflect final destination of the image.
-FLUENTBIT_IMAGE='gcr.io/cloud-applink-external-release/logagent:unstable'
+FLUENTBIT_IMAGE='gcr.io/cloud-applink-external-release/applink-logagent:unstable'
 CONTAINER_NAME='beyondcorp-fluentbit'
 CREDENTIALS_PATH="${HOME}/.config/gcloud"
 CONTAINER_LOGS_PATH='/var/lib/docker/containers'
