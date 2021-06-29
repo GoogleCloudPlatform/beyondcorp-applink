@@ -3,7 +3,7 @@
 [Terraform](https://www.terraform.io/) is a tool that allows using
 Infrastructure as Code to provision and manage any cloud, infrastructure, or
 service. In this step we will use Terraform for actuating the necessary GCP
-resources.
+resources in project B.
 
 *   Download and
     [install Terraform](https://www.terraform.io/intro/getting-started/install.html)
@@ -27,8 +27,9 @@ user traffic from Applink Gateways and forwards the traffic to the application
 endpoints. The connector uses a GCP Service Account (provisioned per connector)
 as its identity.
 
-This step sets up the necessary metadata in GCP (including the service account)
-to bootstrap the remote connector(s).
+This step sets up the necessary metadata in GCP project B (including the service
+account) to bootstrap the remote connector(s). This step does not deploy the
+connector software in remote enterprise network simulated by GCP project A.
 
 **NOTE: Please refer to the [README file](terraform/connector/README.md) for the
 connector module for the most up to date information about the necessary input &
@@ -45,7 +46,7 @@ output configurations.**
 3.  Run `$ terraform apply -var-file=[FILEPATH]` to actuate the resources. Upon
     successful completion you should see an "Apply Complete" screen as shown
     below with some output information about the connector you just created.
-    Please note the output (shown in green) for use in future steps.
+    Please take a note of the output (shown in green) for use in future steps.
 
 ![Connector Terraform Console Output](images/connector-terraform-output.png "Terraform Console Output")
 
