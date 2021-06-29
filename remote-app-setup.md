@@ -1,4 +1,4 @@
-### Application
+### Remote Application
 
 Identify the remote application that you would like to secure using BCE Applink.
 For the purposes of this user guide, a remote application can be simulated using
@@ -26,4 +26,4 @@ deployed in your environment.
 This user guide will use this application as the target for enabling
 connectivity.
 
-[Next: Create a GCP Project](gcp-project-setup.md)
+[Next: Configure your GCP project B using Terraform scripts](terraform-config.md)

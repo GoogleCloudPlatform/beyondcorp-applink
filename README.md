@@ -130,7 +130,7 @@ minimal setup.
 ## Step-by-Step Deployment
 
 1.  [Create](gcp-project-setup.md) GCP projects A and B.
-2.  [Set up](remote-app-setup.md) your remote application in GCP project A.
+2.  [Simulate](remote-app-setup.md) your remote application in GCP project A.
 3.  [Configure](terraform-config.md) your GCP project B using Terraform scripts.
 4.  [Set up](connector-setup.md) the Connector VM in GCP project A.
 5.  [Publish](iap-lb-setup.md) application using Identity Aware Proxy.
