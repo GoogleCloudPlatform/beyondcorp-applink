@@ -89,8 +89,9 @@ preview**.
     *   Red Hat Enterprise Linux Server 7.8 (Maipo) x86_64
     *   Ubuntu 16.04 or above
 *   The target remote application must be accessible via an IP address in the
-    customer remote network and accept TCP traffic. The remote application must
-    be reachable from the connector VM instance.
+    customer remote network and accept TCP traffic from within the remote
+    network. The remote application must be reachable from the connector VM
+    instance, which typically is running in the same remote network.
 *   A DNS hostname that will be used as the ingress point to IAP. You can
     [register a domain on Google Domains](https://support.google.com/domains/answer/4491208),
     or use the domain registrar of your choice.
@@ -119,6 +120,8 @@ preview**.
         *   The main component is a Managed Instance Group Instance running
             custom google software "*Gateways*" to receive connections from the
             connector VM.
+        *   A cloud storage bucket is created to store the config metadata for
+            "connector" to establish connectivity with the "Gateway".
 
 More complex topologies with multiple applications, connector VMs and Gateways
 can be built as desired. For the sake of simplicity this document demonstrates a
@@ -126,10 +129,10 @@ minimal setup.
 
 ## Step-by-Step Deployment
 
-1.  [Set up](remote-app-setup.md) your remote application.
-2.  [Create](gcp-project-setup.md) a GCP Project.
-3.  [Configure](terraform-config.md) your GCP project using Terraform scripts.
-4.  [Set up](connector-setup.md) the Connector VM.
+1.  [Create](gcp-project-setup.md) GCP projects A and B.
+2.  [Set up](remote-app-setup.md) your remote application in GCP project A.
+3.  [Configure](terraform-config.md) your GCP project B using Terraform scripts.
+4.  [Set up](connector-setup.md) the Connector VM in GCP project A.
 5.  [Publish](iap-lb-setup.md) application using Identity Aware Proxy.
 
 ## Help

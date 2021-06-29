@@ -16,22 +16,23 @@ Modular BCE Applink Connectors for GCP.
 |------|-------------|
 | connector_info | Map from connector keys to their relevant information. |
 
+## Prerequisites
+
+You should have created a GCP project for deploying BCE Applink Gateway. You
+will use this project to actuate the resources associated with connector
+metadata.
+
 ## Getting Started
 
-1.  [Create a GCP project & setup billing](https://cloud.google.com/resource-manager/docs/creating-managing-projects).
-    ```
-    gcloud projects create [PROJECT_ID]
-    gcloud beta billing projects link [PROJECT_ID] --billing-account=[ACCOUNT_ID]
-    ```
-2.  Run ```terraform init``` to install all modules
+1.  Run ```terraform init``` to install all modules
 
-3.  Dry run of actuating resources using terraform
+2.  Dry run of actuating resources using terraform
     ```
     terraform plan -var-file=[FILEPATH]
     ```
     NOTE: If service account impersonation is needed, the impersonating accounts must be created prior to this step.
 
-4.  Actuate resources using terraform
+3.  Actuate resources using terraform
     ```
     terraform apply -var-file=[FILEPATH]
     ```

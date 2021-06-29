@@ -1,10 +1,12 @@
 ### GCP Consumer Project Setup
 
-1.  Create a
+1.  Create
     [GCP Project](https://cloud.google.com/resource-manager/docs/creating-managing-projects).
     The GCP project will be used to hold all the resources needed to enable
     connectivity and to create access control policies. Setup Billing & enable
     compute engine & IAP APIs on the project.
+
+    Repeat the steps below to create two projects, A and B.
 
     ```
     $ gcloud projects create [PROJECT_ID]
@@ -18,12 +20,12 @@
     ```
 
 2.  Contact the GCP team to receive a Private Preview sign-up form. Fill out the
-    form using the project you just created. Once you've submitted the form and
-    your request is approved by the GCP team, you should receive a welcome
-    email. After you receive the email, you should have access to the Docker
-    images needed for later steps.
+    form using the project B that you just created. Once you've submitted the
+    form and your request is approved by the GCP team, you should receive a
+    welcome email. After you receive the email, you should have access to the
+    Docker images needed for later steps.
 
-3.  Configure the project's OAuth consent screen as detailed
+3.  Configure the project B's OAuth consent screen as detailed
     [here](https://cloud.google.com/iap/docs/tutorial-gce#set_up_iap).
 
     1.  The first time you configure IAP, you will need to configure the consent
@@ -35,4 +37,4 @@
 
 ![OAuth Consent Screen in the Cloud Console](images/oauth-config.png "OAuth Consent Screen")
 
-[Next: Configure your GCP project using Terraform scripts](terraform-config.md)
+[Next: Configure your GCP project B using Terraform scripts](terraform-config.md)
