@@ -37,4 +37,4 @@
 
 ![OAuth Consent Screen in the Cloud Console](images/oauth-config.png "OAuth Consent Screen")
 
-[Next: Configure your GCP project B using Terraform scripts](terraform-config.md)
+[Next: Simulate your remote application in Project A](remote-app-setup.md)
