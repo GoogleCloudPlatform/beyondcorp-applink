@@ -22,7 +22,7 @@ variable "project_id" {
 variable "image" {
   description = "The Docker image to deploy to GCE instances"
   type        = string
-  default     = "gcr.io/cloud-applink-external-release/applink_gw:latest"
+  default     = "gcr.io/cloud-applink-external-release/applink_gw:unstable"
 }
 
 variable "healthcheck_type" {
