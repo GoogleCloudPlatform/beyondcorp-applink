@@ -1,0 +1,8 @@
+# Kubernetes Namespace to deploy the resources to.
+namespace: applink-k8s
+
+# Container image to be used in the connector deployment.
+connectorImage: gcr.io/cloud-applink-external-release/applink_connector:unstable
+
+# The name of the Kubernetes deployment.
+deploymentName: beyondcorp-applink-connector
