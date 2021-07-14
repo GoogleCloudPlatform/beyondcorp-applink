@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{.Values.deploymentName}}
+  namespace: {{.Values.namespace}}
+spec:
+  selector:
+    matchLabels:
+      app: {{.Values.deploymentName}}
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: {{.Values.deploymentName}}
+    spec:
+      hostNetwork: true
+      containers:
+      - name: beyondcorp-applink-connector
+        image: {{.Values.connectorImage}}
+        volumeMounts:
+        - mountPath: /applink/connections
+          name: connections-volume
+        - mountPath: /applink/config
+          name: credentials-volume
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/applink/config/key.json"
+        args: ["--connection_directory=/applink/connections/..data", "--watch_connection_directory"]
+
+      volumes:
+      - name: connections-volume
+        configMap:
+          name: connections
+      - name: credentials-volume
+        secret:
+          secretName: credentials
