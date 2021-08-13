@@ -19,7 +19,8 @@
 
 set -euo pipefail
 
-readonly APP_CONNECTION_FILE='app-connection'
+readonly APP_CONNECTION_FILE='app-connection.yaml'
+readonly APP_CREDENTIAL_FILE='app-credential.json'
 CONNECTOR_IMAGE='gcr.io/cloud-applink-external-release/applink_connector'
 GCS_CONNECTION_OBJECT_ID=''
 CONTAINER_NAME='bce-applink-connector'
@@ -138,7 +139,7 @@ if [[ ! -d /etc/applink/connections ]]; then
 fi
 
 # Copy Application Default Credentials to Applink configurations directory
-sudo cp ~/.config/gcloud/application_default_credentials.json /etc/applink/config/
+sudo cp ~/.config/gcloud/application_default_credentials.json /etc/applink/config/${APP_CREDENTIAL_FILE}
 
 # Use gsutil to fetch the connection configuration file from GCS and move it
 # into the Applink configurations directory
@@ -149,7 +150,7 @@ docker_flags=(
   -d
   --read-only
   -v /etc/applink:/applink
-  -e GOOGLE_APPLICATION_CREDENTIALS=/applink/config/application_default_credentials.json
+  -e GOOGLE_APPLICATION_CREDENTIALS=/applink/config/${APP_CREDENTIAL_FILE}
   --network="${CONTAINER_NETWORK}"
 )
 
