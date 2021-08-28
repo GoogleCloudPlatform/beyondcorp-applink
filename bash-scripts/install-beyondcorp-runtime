@@ -1,0 +1,63 @@
+#!/bin/bash
+
+IMAGE='gcr.io/appconnector-external-release/appconnector_remote_cp:latest'
+readonly ENTRYPOINT='/applink_control_runtime/bin/install'
+
+check_command() {
+  if ! command -v "${1}" &> /dev/null; then
+    echo "Missing mandatory command: ${1}. Please install and retry."
+    exit 1
+  fi
+}
+
+precondition_checks () {
+  check_command "docker"
+  check_command "systemd"
+}
+
+function usage () {
+  cat << USAGE
+  Configure and start Applink Connector
+  Usage: $0 [-i <image>] [-c <connector_name>] [-s <service_account>]
+  -h                       Print this help message.
+  -i <image>               The Google Container Registry path of the
+                           connector container image
+                           (gcr.io/project-id/image-name)
+                           Default is "${IMAGE}"
+                           if not specified.
+  -c <connector_name>      The connector name using the form
+                           "projects/{project_id}/locations/{location_id}/connectors/{connector_id}".
+  -s <service_account>     The email of the service account to be
+                           impersonated
+                           (sa-name@project-id.iam.gserviceaccount.com)
+USAGE
+}
+
+# Parse command-line flags
+while getopts 'hi:c:s:' opt; do
+  case "${opt}" in
+    h)
+      usage
+      exit 0
+      ;;
+    i) IMAGE="${OPTARG}" ;;
+    c) CONNECTOR_NAME="${OPTARG}"  ;;
+    s) SERVICE_ACCOUNT="${OPTARG}" ;;
+    ?)
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+precondition_checks
+
+docker run --rm \
+  -v /:/mounted_host_root \
+  -v ~:/mounted_host_home \
+  --entrypoint="${ENTRYPOINT}" \
+  "${IMAGE}" \
+  --connector_name="${CONNECTOR_NAME}" \
+  --service_account="${SERVICE_ACCOUNT}" \
+  --uid=`id -u` \
+  --gid=`id -g`
