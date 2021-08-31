@@ -12,21 +12,19 @@ SERVICE_ACCOUNT=''
 usage() {
   cat << USAGE
   Configure and start beyondcorp runtime installer
-  Usage: $0 [-u <beyondcorp_user>] [-c <connector_name>] [-s <service_account>]
+  Usage: $0 [-u <beyondcorp_user>] -c <connector_name> -s <service_account>
   -h                       Print this help message.
-  -u <beyondcorp_user>     A user name installer will create to launch the docker container.
+  -u <beyondcorp_user>     The user the beyondcorp remote agent will run as.
                            Default is "${BEYONDCORP_USER}" if not specified.
   -c <connector_name>      The connector name using the form
                            "projects/{project_id}/locations/{location_id}/connectors/{connector_id}".
-                           Default is "${CONNECTOR_NAME}" if not specified.
   -s <service_account>     The service account email to use for authentication
                            (sa-name@project-id.iam.gserviceaccount.com)
-                           Default is "${SERVICE_ACCOUNT}" if not specified.
 USAGE
 }
 
 forbid_empty_flag() {
-  if [[ "${1}" == "" ]]; then
+  if [[ -z "${1}" ]]; then
     echo "Empty flag '${2}' is forbidden."
     echo ""
     usage >&2
@@ -102,8 +100,8 @@ install() {
   installer_flags=(
     --connector_name="${CONNECTOR_NAME}"
     --service_account="${SERVICE_ACCOUNT}"
-    --uid=`id -u ${BEYONDCORP_USER}`
-    --gid=`id -g ${BEYONDCORP_USER}`
+    --uid="$(id -u "${BEYONDCORP_USER}")"
+    --gid="$(id -g "${BEYONDCORP_USER}")"
   )
   docker run --rm "${docker_flags[@]}" "${INSTALLER_IMAGE}" "${installer_flags[@]}"
 }
