@@ -70,7 +70,7 @@ precondition_checks() {
 
 # 3. user
 create_user() {
-  if id ${BEYONDCORP_USER} &> /dev/null; then
+  if id "${BEYONDCORP_USER}" &> /dev/null; then
     echo "User '${BEYONDCORP_USER}' already exists. Continue."
   else
     echo "Creating user '${BEYONDCORP_USER}'."
@@ -92,20 +92,23 @@ create_user() {
 }
 
 # 4. docker
-docker_flags=(
-  -v /:/mounted_host_root
-  -v "${HOME}":/mounted_host_home
-  --entrypoint="${ENTRYPOINT}"
-)
+install() {
+  docker_flags=(
+    -v /:/mounted_host_root
+    -v "${HOME}":/mounted_host_home
+    --entrypoint="${ENTRYPOINT}"
+  )
 
-installer_flags=(
-  --connector_name="${CONNECTOR_NAME}"
-  --service_account="${SERVICE_ACCOUNT}"
-  --uid=`id -u ${BEYONDCORP_USER}`
-  --gid=`id -g ${BEYONDCORP_USER}`
-)
+  installer_flags=(
+    --connector_name="${CONNECTOR_NAME}"
+    --service_account="${SERVICE_ACCOUNT}"
+    --uid=`id -u ${BEYONDCORP_USER}`
+    --gid=`id -g ${BEYONDCORP_USER}`
+  )
+  docker run --rm "${docker_flags[@]}" "${INSTALLER_IMAGE}" "${installer_flags[@]}"
+}
 
-parse_flags
+parse_flags "$@"
 precondition_checks
 create_user
-echo docker run --rm "${docker_flags[@]}" "${INSTALLER_IMAGE}" "${installer_flags[@]}"
+install
