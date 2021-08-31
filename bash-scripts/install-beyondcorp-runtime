@@ -1,63 +1,107 @@
 #!/bin/bash
 
-IMAGE='gcr.io/appconnector-external-release/appconnector_remote_cp:latest'
-readonly ENTRYPOINT='/applink_control_runtime/bin/install'
+set -euo pipefail
 
-check_command() {
-  if ! command -v "${1}" &> /dev/null; then
-    echo "Missing mandatory command: ${1}. Please install and retry."
+readonly INSTALLER_IMAGE='gcr.io/appconnector-external-release/appconnector_remote_cp:latest'
+readonly ENTRYPOINT='/applink_control_runtime/bin/install'
+BEYONDCORP_USER='beyondcorp'
+CONNECTOR_NAME=''
+SERVICE_ACCOUNT=''
+
+# 1. flags
+usage() {
+  cat << USAGE
+  Configure and start beyondcorp runtime installer
+  Usage: $0 [-u <beyondcorp_user>] [-c <connector_name>] [-s <service_account>]
+  -h                       Print this help message.
+  -u <beyondcorp_user>     A user name installer will create to launch the docker container.
+                           Default is "${BEYONDCORP_USER}" if not specified.
+  -c <connector_name>      The connector name using the form
+                           "projects/{project_id}/locations/{location_id}/connectors/{connector_id}".
+                           Default is "${CONNECTOR_NAME}" if not specified.
+  -s <service_account>     The service account email to use for authentication
+                           (sa-name@project-id.iam.gserviceaccount.com)
+                           Default is "${SERVICE_ACCOUNT}" if not specified.
+USAGE
+}
+forbid_empty_flag() {
+  if [[ "${1}" == "" ]]; then
+    echo "Empty flag '${2}' is forbidden."
+    echo ""
+    usage >&2
     exit 1
   fi
 }
+parse_flags() {
+  while getopts 'hu:c:s:' opt; do
+    case "${opt}" in
+      h)
+        usage
+        exit 0
+        ;;
+      u) BEYONDCORP_USER="${OPTARG}" ;;
+      c) CONNECTOR_NAME="${OPTARG}" ;;
+      s) SERVICE_ACCOUNT="${OPTARG}" ;;
+      ?)
+        usage >&2
+        exit 1
+        ;;
+    esac
+  done
+  forbid_empty_flag "${BEYONDCORP_USER}" "<beyondcorp_user>"
+  forbid_empty_flag "${CONNECTOR_NAME}" "<connector_name>"
+  forbid_empty_flag "${SERVICE_ACCOUNT}" "<service_account>"
+}
 
-precondition_checks () {
+# 2. command
+check_command() {
+  if ! "${1}" --version &> /dev/null; then
+    echo "Missing mandatory command: '${1}'. Please install and retry."
+    exit 1
+  fi
+}
+precondition_checks() {
   check_command "docker"
   check_command "systemd"
 }
 
-function usage () {
-  cat << USAGE
-  Configure and start Applink Connector
-  Usage: $0 [-i <image>] [-c <connector_name>] [-s <service_account>]
-  -h                       Print this help message.
-  -i <image>               The Google Container Registry path of the
-                           connector container image
-                           (gcr.io/project-id/image-name)
-                           Default is "${IMAGE}"
-                           if not specified.
-  -c <connector_name>      The connector name using the form
-                           "projects/{project_id}/locations/{location_id}/connectors/{connector_id}".
-  -s <service_account>     The email of the service account to be
-                           impersonated
-                           (sa-name@project-id.iam.gserviceaccount.com)
-USAGE
+# 3. user
+create_user() {
+  if id ${BEYONDCORP_USER} &> /dev/null; then
+    echo "User '${BEYONDCORP_USER}' already exists. Continue."
+  else
+    echo "Creating user '${BEYONDCORP_USER}'."
+    if ! sudo useradd "${BEYONDCORP_USER}"; then
+      echo "Failed to create user '${BEYONDCORP_USER}'."
+      exit 1
+    fi
+  fi
+
+  if id -nG "${BEYONDCORP_USER}" | grep -qw "docker"; then
+    echo "User '${BEYONDCORP_USER}' belongs to group 'docker'. Continue."
+  else
+    echo "Appending user '${BEYONDCORP_USER}' to group 'docker'."
+    if ! sudo usermod -aG "docker" "${BEYONDCORP_USER}"; then
+      echo "Failed to append user '${BEYONDCORP_USER}' to group 'docker'."
+      exit 1
+    fi
+  fi
 }
 
-# Parse command-line flags
-while getopts 'hi:c:s:' opt; do
-  case "${opt}" in
-    h)
-      usage
-      exit 0
-      ;;
-    i) IMAGE="${OPTARG}" ;;
-    c) CONNECTOR_NAME="${OPTARG}"  ;;
-    s) SERVICE_ACCOUNT="${OPTARG}" ;;
-    ?)
-      usage >&2
-      exit 1
-      ;;
-  esac
-done
+# 4. docker
+docker_flags=(
+  -v /:/mounted_host_root
+  -v "${HOME}":/mounted_host_home
+  --entrypoint="${ENTRYPOINT}"
+)
+installer_flags=(
+  --connector_name="${CONNECTOR_NAME}"
+  --service_account="${SERVICE_ACCOUNT}"
+  --uid=`id -u ${BEYONDCORP_USER}`
+  --gid=`id -g ${BEYONDCORP_USER}`
+)
 
+parse_flags
 precondition_checks
-
-docker run --rm \
-  -v /:/mounted_host_root \
-  -v ~:/mounted_host_home \
-  --entrypoint="${ENTRYPOINT}" \
-  "${IMAGE}" \
-  --connector_name="${CONNECTOR_NAME}" \
-  --service_account="${SERVICE_ACCOUNT}" \
-  --uid=`id -u` \
-  --gid=`id -g`
+create_user
+echo docker run --rm "${docker_flags[@]}" "${INSTALLER_IMAGE}" "${installer_flags[@]}"
