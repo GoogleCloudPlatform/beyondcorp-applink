@@ -24,6 +24,7 @@ usage() {
                            Default is "${SERVICE_ACCOUNT}" if not specified.
 USAGE
 }
+
 forbid_empty_flag() {
   if [[ "${1}" == "" ]]; then
     echo "Empty flag '${2}' is forbidden."
@@ -32,6 +33,7 @@ forbid_empty_flag() {
     exit 1
   fi
 }
+
 parse_flags() {
   while getopts 'hu:c:s:' opt; do
     case "${opt}" in
@@ -53,13 +55,14 @@ parse_flags() {
   forbid_empty_flag "${SERVICE_ACCOUNT}" "<service_account>"
 }
 
-# 2. command
+# 2. checks
 check_command() {
   if ! "${1}" --version &> /dev/null; then
     echo "Missing mandatory command: '${1}'. Please install and retry."
     exit 1
   fi
 }
+
 precondition_checks() {
   check_command "docker"
   check_command "systemd"
@@ -94,6 +97,7 @@ docker_flags=(
   -v "${HOME}":/mounted_host_home
   --entrypoint="${ENTRYPOINT}"
 )
+
 installer_flags=(
   --connector_name="${CONNECTOR_NAME}"
   --service_account="${SERVICE_ACCOUNT}"
