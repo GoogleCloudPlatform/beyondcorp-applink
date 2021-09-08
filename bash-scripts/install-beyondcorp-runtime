@@ -16,42 +16,37 @@
 #
 #
 # Installs the BeyondCorp Remote Agent
-
 set -euo pipefail
-
 readonly BEYONDCORP_REPOSITORIES='gcr.io/appconnector-external-release'
 readonly REMOTE_AGENT_REPOSITORY="${BEYONDCORP_REPOSITORIES}/appconnector_remote_cp"
+readonly REMOTE_AGENT_TAG="appconnector_remote_cp_20210901a_RC00"
+readonly REMOTE_AGENT_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
 readonly REMOTE_AGENT_INSTALLER_ENTRYPOINT='/applink_control_runtime/bin/install'
 readonly REMOTE_AGENT_CONTAINER='bce-control-runtime'
 readonly BEYONDCORP_CONTAINERS=("${REMOTE_AGENT_CONTAINER}" 'bce-connector' 'bce-logagent')
 readonly BEYONDCORP_SERVICE='beyondcorp'
 readonly BEYONDCORP_DIR='/var/beyondcorp'
-
 BEYONDCORP_USER='beyondcorp'
 CONNECTOR_NAME=''
 SERVICE_ACCOUNT=''
 UNINSTALL='false'
-
 # logger
 INFO() { echo "INFO: ${1}"; }
 WARN() { echo "WARN: ${1}"; }
 ERROR() { echo "ERROR: ${1}"; }
 FATAL() { echo "FATAL: ${1}"; exit 1; }
-
 repeat() {
   for ((i = 0; i < "${2}"; i++)); do
     echo -n "${1}"
   done
   echo
 }
-
 title() {
   local len="${#1}"
   repeat "#" "$((len + 4))"
   echo "# ${1} #"
   repeat "#" "$((len + 4))"
 }
-
 # 1. flags
 usage() {
   cat << USAGE
@@ -68,7 +63,6 @@ usage() {
                            No other flags are required.
 USAGE
 }
-
 install_complete_message() {
   cat << INSTALL_COMPLETE_MESSAGE
 #################################################################################
@@ -82,7 +76,6 @@ install_complete_message() {
 #################################################################################
 INSTALL_COMPLETE_MESSAGE
 }
-
 forbid_empty_flag() {
   if [[ -z "${1}" ]]; then
     ERROR "Empty flag '${2}' is forbidden."
@@ -91,7 +84,6 @@ forbid_empty_flag() {
     exit 1
   fi
 }
-
 parse_flags() {
   title 'Parsing flags...'
   while getopts 'hu:c:s:r' opt; do
@@ -117,7 +109,6 @@ parse_flags() {
   forbid_empty_flag "${CONNECTOR_NAME}" "<connector_name>"
   forbid_empty_flag "${SERVICE_ACCOUNT}" "<service_account>"
 }
-
 # 2. checks
 check_dependency() {
   INFO "Checking dependency '${1}'"
@@ -126,13 +117,11 @@ check_dependency() {
   fi
   echo
 }
-
 precondition_checks() {
   title 'Checking dependencies...'
   check_dependency "docker" "docker version" "Please install Docker Engine on this machine (https://docs.docker.com/engine/install/)."
   check_dependency "systemctl" "systemctl --version" "Please install systemctl on this machine (https://www.man7.org/linux/man-pages/man1/systemctl.1.html)."
 }
-
 # 3. user
 add_user() {
   title 'Adding user...'
@@ -144,7 +133,6 @@ add_user() {
       FATAL "Failed to add user '${BEYONDCORP_USER}'."
     fi
   fi
-
   if id -nG "${BEYONDCORP_USER}" | grep -qw "docker"; then
     INFO "User '${BEYONDCORP_USER}' belongs to group 'docker'. Continue."
   else
@@ -154,7 +142,6 @@ add_user() {
     fi
   fi
 }
-
 # Before starting the uninstall, find the installed beyondcorp user. It will be
 # use by delete_user().
 installed_beyondcorp_user=''
@@ -182,7 +169,6 @@ get_user() {
     return 0
   fi
 }
-
 delete_user() {
   title 'Deleting user...'
   if [[ -z "${installed_beyondcorp_user}" ]]; then
@@ -198,14 +184,12 @@ delete_user() {
     WARN "Failed to delete user '${installed_beyondcorp_user}'. Continue."
   fi
 }
-
 # 4. docker
 docker_flags=(
   -v /:/mounted_host_root
   -v "${HOME}":/mounted_host_home
   --entrypoint="${REMOTE_AGENT_INSTALLER_ENTRYPOINT}"
 )
-
 install() {
   title 'Installing BeyondCorp Remote Agent...'
   installer_flags=(
@@ -214,23 +198,22 @@ install() {
     --uid="$(id -u "${BEYONDCORP_USER}")"
     --gid="$(id -g "${BEYONDCORP_USER}")"
   )
-  # Pull before run. Otherwise, docker reuse the local one with tag `latest`
-  # which may not be the latest version.
-  docker pull "${REMOTE_AGENT_REPOSITORY}:latest"
-  if ! docker run --rm "${docker_flags[@]}" "${REMOTE_AGENT_REPOSITORY}:latest" "${installer_flags[@]}"; then
+  # Pull before run. Otherwise, docker reuse the local one with the same tag
+  # which may not be the version we want.
+  docker pull "${REMOTE_AGENT_IMAGE}"
+  if ! docker run --rm "${docker_flags[@]}" "${REMOTE_AGENT_IMAGE}" "${installer_flags[@]}"; then
     FATAL "Failed to install BeyondCorp Remote Agent."
   fi
-  # TODO(shixiong): decide whether to remove `${REMOTE_AGENT_REPOSITORY}:latest`
-  # . If the stable and unstable version won't use it, we should remove it. The
-  # image with tag `latest` won't be used during the run time.
+  # TODO(shixiong): decide whether to remove `${REMOTE_AGENT_IMAGE}`. If the
+  #  stable and unstable version won't use it, we should remove it. The image
+  #  with tag `REMOTE_AGENT_TAG` won't be used during the run time.
 }
-
 # Before starting the uninstall, find the remote agent image. It will be used by
 # uninstall().
-# If remote agent is not running, but there is only one REMOTE_AGENT_REPOSITORY,
-# use it.
-# Otherwise, use the REMOTE_AGENT_REPOSITORY:latest. Docker may download
-# REMOTE_AGENT_REPOSITORY:latest, if it isn't found locally.
+# If remote agent is not running, but there is only one remote agent image, use
+# it.
+# Otherwise, use the REMOTE_AGENT_IMAGE. Docker may download REMOTE_AGENT_IMAGE,
+# if it isn't found locally.
 installed_remote_agent_image=''
 get_installed_remote_agent_image() {
   mapfile -t images < <(docker ps --filter "name=${REMOTE_AGENT_CONTAINER}" --format="{{.Image}}")
@@ -243,10 +226,9 @@ get_installed_remote_agent_image() {
     installed_remote_agent_image="${images[0]}"
     return 0
   fi
-  installed_remote_agent_image="${REMOTE_AGENT_REPOSITORY}:latest"
+  installed_remote_agent_image="${REMOTE_AGENT_IMAGE}"
   WARN "Docker container '${REMOTE_AGENT_CONTAINER}' is not running. Using '${installed_remote_agent_image}' to uninstall."
 }
-
 uninstall() {
   title 'Uninstalling BeyondCorp Remote Agent...'
   installer_flags=(
@@ -275,7 +257,6 @@ uninstall() {
     fi
   done
 }
-
 # 5. systemd service
 start_service() {
   title 'Starting systemd service...'
@@ -288,7 +269,6 @@ start_service() {
     FATAL "Failed to start systemd service '${BEYONDCORP_SERVICE}'."
   fi
 }
-
 stop_service() {
   title 'Stopping systemd service...'
   INFO "Stopping systemd service '${BEYONDCORP_SERVICE}'."
@@ -300,7 +280,6 @@ stop_service() {
     WARN "Failed to disable systemd service '${BEYONDCORP_SERVICE}'. Continue."
   fi
 }
-
 # main
 parse_flags "$@"
 if "${UNINSTALL}"; then
