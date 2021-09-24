@@ -31,7 +31,8 @@ The connector supports the following connection configurations:
     ...
     ```
 
-2.  HTTP with a FQDN for the app_endpoint
+2.  HTTP with a FQDN for the app_endpoint (make sure connector VM has a valid
+    DNS setting and thus can resolve the correct IP address of the gateway)
 
     Gateway
     [sample.tfvars file](terraform/gateway/examples/single-app/sample.tfvars):
@@ -55,7 +56,8 @@ The connector supports the following connection configurations:
     ...
     ```
 
-4.  HTTPS with a FQDN for the app_endpoint
+4.  HTTPS with a FQDN for the app_endpoint (make sure connector VM has a valid
+    DNS setting and thus can resolve the correct IP address of the gateway)
 
     Gateway
     [sample.tfvars file](terraform/gateway/examples/single-app/sample.tfvars):
@@ -100,14 +102,14 @@ Identities **#1** and **#2** need to be part of the signup request for BCE
 AppLink and provided to your GCP Customer Engineer/Cloud Security Specialist.
 
 On the *Gateway(GCP)* side: **#1** (Default Compute Service Account) acts as the
-identity of the gateway GCP VM. It is used to fetch the image from GCR and run
-the VM itself.
+identity of the gateway GCP VM. It is used to fetch the Gateway Docker image of
+BCE Applink from GCR and run the VM itself.
 
 On the *Connector(on-prem)* side: **#2** (Admin User Account) is used when the bash
 script runs *gcloud auth login*. **#2** is then used to fetch the connector
-image for GCR.
+Docker image of BCE Applink for GCR.
 
-Later, the AppLink connector container is started with **#2** (Admin User
+Later, the bash script starts AppLink connector container with **#2** (Admin User
 Account) impersonating **#3** (Connector Service Account). Thus, internally all
 Applink-related IAM bindings are tied to **#3** (Connector Service Account).
 

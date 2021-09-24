@@ -1,8 +1,8 @@
-### Application
+### Remote Application
 
 Identify the remote application that you would like to secure using BCE Applink.
 For the purposes of this user guide, a remote application can be simulated using
-a VM running in GCP. For a real world use case, please use an application
+a VM running in GCP project A. For a real world use case, please use an application
 deployed in your environment.
 
 *   For example, simple Apache web-server running in Project A would be used.
@@ -18,12 +18,12 @@ deployed in your environment.
 *   Verify that you can access the application from the remote network using its
     IP address.
 
-    *   Note the internal IP address: This would be used as *app_endpoint* in
-        future Terraform configurations.
+    *   Note the internal IP address: This would be specified as *app_endpoint*
+        in Terraform configurations in the following sections.
 
 ![Apache Web Server Default Page](images/apache-default-page.png "Apache Default Page")
 
 This user guide will use this application as the target for enabling
 connectivity.
 
-[Next: Create a GCP Project](gcp-project-setup.md)
+[Next: Configure your GCP project B using Terraform scripts](terraform-config.md)

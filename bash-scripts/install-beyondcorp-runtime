@@ -1,0 +1,308 @@
+#!/bin/bash
+#
+## Copyright 2021 Google LLC
+##
+## Licensed under the Apache License, Version 2.0 (the "License");
+## you may not use this file except in compliance with the License.
+## You may obtain a copy of the License at
+##
+##      http://www.apache.org/licenses/LICENSE-2.0
+##
+## Unless required by applicable law or agreed to in writing, software
+## distributed under the License is distributed on an "AS IS" BASIS,
+## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+## See the License for the specific language governing permissions and
+## limitations under the License.
+#
+#
+# Installs the BeyondCorp Remote Agent
+
+set -euo pipefail
+
+readonly BEYONDCORP_REPOSITORIES='gcr.io/appconnector-external-release'
+readonly REMOTE_AGENT_REPOSITORY="${BEYONDCORP_REPOSITORIES}/appconnector_remote_cp"
+readonly REMOTE_AGENT_TAG='appconnector_remote_cp_20210915_RC00'
+readonly REMOTE_AGENT_INSTALLER_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
+readonly REMOTE_AGENT_RUNNER_TARGET_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
+readonly REMOTE_AGENT_RUNNER_STABLE_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
+readonly REMOTE_AGENT_INSTALLER_ENTRYPOINT='/applink_control_runtime/bin/install'
+readonly REMOTE_AGENT_CONTAINER='bce-control-runtime'
+readonly BEYONDCORP_CONTAINERS=("${REMOTE_AGENT_CONTAINER}" 'bce-connector' 'bce-logagent')
+readonly BEYONDCORP_SERVICE='beyondcorp'
+readonly BEYONDCORP_DIR='/var/beyondcorp'
+
+BEYONDCORP_USER='beyondcorp'
+CONNECTOR_NAME=''
+SERVICE_ACCOUNT=''
+UNINSTALL='false'
+
+# logger
+INFO() { echo "INFO: ${1}"; }
+WARN() { echo "WARN: ${1}"; }
+ERROR() { echo "ERROR: ${1}"; }
+FATAL() { echo "FATAL: ${1}"; exit 1; }
+
+repeat() {
+  for ((i = 0; i < "${2}"; i++)); do
+    echo -n "${1}"
+  done
+  echo
+}
+
+title() {
+  local len="${#1}"
+  repeat "#" "$((len + 4))"
+  echo "# ${1} #"
+  repeat "#" "$((len + 4))"
+}
+
+# 1. flags
+usage() {
+  cat << USAGE
+  Configure and start beyondcorp remote agent installer
+  Usage: $0 [-u <beyondcorp_user>] -c <connector_name> -s <service_account> [-r]
+  -h                       Print this help message.
+  -u <beyondcorp_user>     The user the beyondcorp remote agent will run as.
+                           Default is "${BEYONDCORP_USER}" if not specified.
+  -c <connector_name>      The connector name using the form
+                           "projects/{project_id}/locations/{location_id}/connectors/{connector_id}".
+  -s <service_account>     The service account email to use for authentication
+                           (sa-name@project-id.iam.gserviceaccount.com)
+  -r <uninstall>           Uninstall beyondcorp remote agent.
+                           No other flags are required.
+USAGE
+}
+
+install_complete_message() {
+  cat << INSTALL_COMPLETE_MESSAGE
+#################################################################################
+# BeyondCorp Remote Agent has been successfully installed and started.          #
+#                                                                               #
+# Instructions:                                                                 #
+# ----------------------------------------------------------------------------- #
+# |Stop  | sudo systemctl stop beyondcorp & sudo systemctl disable beyondcorp | #
+# |Start | sudo systemctl start beyondcorp & sudo systemctl enable beyondcorp | #
+# ----------------------------------------------------------------------------- #
+#################################################################################
+INSTALL_COMPLETE_MESSAGE
+}
+
+forbid_empty_flag() {
+  if [[ -z "${1}" ]]; then
+    ERROR "Empty flag '${2}' is forbidden."
+    echo
+    usage >&2
+    exit 1
+  fi
+}
+
+parse_flags() {
+  title 'Parsing flags...'
+  while getopts 'hu:c:s:r' opt; do
+    case "${opt}" in
+      h)
+        usage
+        exit 0
+        ;;
+      u) BEYONDCORP_USER="${OPTARG}" ;;
+      c) CONNECTOR_NAME="${OPTARG}" ;;
+      s) SERVICE_ACCOUNT="${OPTARG}" ;;
+      r) UNINSTALL='true' ;;
+      ?)
+        usage >&2
+        exit 1
+        ;;
+    esac
+  done
+  if "${UNINSTALL}"; then
+    return 0
+  fi
+  forbid_empty_flag "${BEYONDCORP_USER}" "<beyondcorp_user>"
+  forbid_empty_flag "${CONNECTOR_NAME}" "<connector_name>"
+  forbid_empty_flag "${SERVICE_ACCOUNT}" "<service_account>"
+}
+
+# 2. checks
+check_dependency() {
+  INFO "Checking dependency '${1}'"
+  if ! ${2}; then
+    FATAL "Missing mandatory command: '${1}'. ${3}."
+  fi
+  echo
+}
+
+precondition_checks() {
+  title 'Checking dependencies...'
+  check_dependency "docker" "docker version" "Please install Docker Engine on this machine (https://docs.docker.com/engine/install/)."
+  check_dependency "systemctl" "systemctl --version" "Please install systemctl on this machine (https://www.man7.org/linux/man-pages/man1/systemctl.1.html)."
+}
+
+# 3. user
+add_user() {
+  title 'Adding user...'
+  if id "${BEYONDCORP_USER}" &> /dev/null; then
+    INFO "User '${BEYONDCORP_USER}' already exists. Continue."
+  else
+    INFO "Adding user '${BEYONDCORP_USER}'."
+    if ! sudo useradd "${BEYONDCORP_USER}"; then
+      FATAL "Failed to add user '${BEYONDCORP_USER}'."
+    fi
+  fi
+
+  if id -nG "${BEYONDCORP_USER}" | grep -qw "docker"; then
+    INFO "User '${BEYONDCORP_USER}' belongs to group 'docker'. Continue."
+  else
+    INFO "Appending user '${BEYONDCORP_USER}' to group 'docker'."
+    if ! sudo usermod -aG "docker" "${BEYONDCORP_USER}"; then
+      FATAL "Failed to append user '${BEYONDCORP_USER}' to group 'docker'."
+    fi
+  fi
+}
+
+# Before starting the uninstall, find the installed beyondcorp user. It will be
+# use by delete_user().
+installed_beyondcorp_user=''
+get_user() {
+  local user arr
+  # load user from the running container.
+  IFS=":" read -r -a arr <<< "$(docker inspect --format '{{.Config.User}}' "${REMOTE_AGENT_CONTAINER}" 2> /dev/null)"
+  if [[ "${#arr[@]}" -ne 0 ]]; then
+    if user="$(id -nu "${arr[0]}" 2> /dev/null)"; then
+      installed_beyondcorp_user="${user}"
+      return 0
+    fi
+  fi
+  # load user from the systemd service.
+  IFS="=" read -r -a arr <<< "$(systemctl show "${BEYONDCORP_SERVICE}" -p UID)"
+  if [[ "${#arr[@]}" -eq 2 ]] && [[ "${arr[1]}" =~ ^[0-9]+$ ]]; then
+    if user="$(id -nu "${arr[1]}" 2> /dev/null)"; then
+      installed_beyondcorp_user="${user}"
+      return 0
+    fi
+  fi
+  # load user from the created directory.
+  if user="$(stat -c '%U' "${BEYONDCORP_DIR}" 2> /dev/null)"; then
+    installed_beyondcorp_user="${user}"
+    return 0
+  fi
+}
+
+delete_user() {
+  title 'Deleting user...'
+  if [[ -z "${installed_beyondcorp_user}" ]]; then
+    WARN "Failed to find the installed beyondcorp user. Continue."
+    return 0
+  fi
+  if ! id "${installed_beyondcorp_user}" &> /dev/null; then
+    WARN "User '${installed_beyondcorp_user}' doesn't exist. Continue."
+    return 0
+  fi
+  INFO "Deleting user '${installed_beyondcorp_user}'."
+  if ! sudo userdel "${installed_beyondcorp_user}"; then
+    WARN "Failed to delete user '${installed_beyondcorp_user}'. Continue."
+  fi
+}
+
+# 4. docker
+docker_flags=(
+  -v /:/mounted_host_root
+  -v "${HOME}":/mounted_host_home
+  --entrypoint="${REMOTE_AGENT_INSTALLER_ENTRYPOINT}"
+)
+
+install() {
+  title 'Installing BeyondCorp Remote Agent...'
+  installer_flags=(
+    --connector_name="${CONNECTOR_NAME}"
+    --service_account="${SERVICE_ACCOUNT}"
+    --target_image="${REMOTE_AGENT_RUNNER_TARGET_IMAGE}"
+    --stable_image="${REMOTE_AGENT_RUNNER_STABLE_IMAGE}"
+    --shell="$(ps -p $PPID -o fname --no-headers)"
+    --admin_uid="$(id -u)"
+    --admin_gid="$(id -g)"
+    --beyondcorp_uid="$(id -u "${BEYONDCORP_USER}")"
+    --beyondcorp_gid="$(id -g "${BEYONDCORP_USER}")"
+  )
+  # Pull before run. Otherwise, docker reuse the local one with the same tag
+  # which may not be the version we want.
+  docker pull "${REMOTE_AGENT_INSTALLER_IMAGE}"
+  if ! docker run --rm "${docker_flags[@]}" "${REMOTE_AGENT_INSTALLER_IMAGE}" "${installer_flags[@]}"; then
+    FATAL "Failed to install BeyondCorp Remote Agent."
+  fi
+  # Remove the installer.
+  if [[ "${REMOTE_AGENT_INSTALLER_IMAGE}" != "${REMOTE_AGENT_RUNNER_TARGET_IMAGE}" && "${REMOTE_AGENT_INSTALLER_IMAGE}" != "${REMOTE_AGENT_RUNNER_STABLE_IMAGE}" ]]; then
+    if ! docker rmi -f "${REMOTE_AGENT_INSTALLER_IMAGE}"; then
+      WARN "Failed to remove installer docker image '${image}'. Continue."
+    fi
+  fi
+}
+
+uninstall() {
+  title 'Uninstalling BeyondCorp Remote Agent...'
+  installer_flags=(
+    --uninstall="true"
+  )
+  # uninstall directories and files.
+  if ! docker run --rm "${docker_flags[@]}" "${REMOTE_AGENT_INSTALLER_IMAGE}" "${installer_flags[@]}"; then
+    WARN "Failed to remove installed directories and files. Continue."
+  fi
+  # remove containers
+  for container in "${BEYONDCORP_CONTAINERS[@]}"; do
+    if [[ "$(docker ps --filter "name=${container}" --format="{{.Names}}" | wc -l)" -eq 0 ]]; then
+      continue
+    fi
+    INFO "Removing docker container '${container}'."
+    if ! docker rm -f "${container}"; then
+      WARN "Failed to remove docker container '${container}'. Continue."
+    fi
+  done
+  # remove images
+  mapfile -t images < <(docker images --format='{{if eq .Tag "<none>"}}{{.ID}}{{else}}{{.Repository}}:{{.Tag}}{{end}}' "${BEYONDCORP_REPOSITORIES}/*")
+  for image in "${images[@]}"; do
+    INFO "Removing docker image '${image}'."
+    if ! docker rmi -f "${image}"; then
+      WARN "Failed to remove docker image '${image}'. Continue."
+    fi
+  done
+}
+
+# 5. systemd service
+start_service() {
+  title 'Starting systemd service...'
+  INFO "Enabling systemd service '${BEYONDCORP_SERVICE}'."
+  if ! sudo systemctl enable "${BEYONDCORP_SERVICE}"; then
+    FATAL "Failed to enable systemd service '${BEYONDCORP_SERVICE}'."
+  fi
+  INFO "Starting systemd service '${BEYONDCORP_SERVICE}'."
+  if ! sudo systemctl start "${BEYONDCORP_SERVICE}"; then
+    FATAL "Failed to start systemd service '${BEYONDCORP_SERVICE}'."
+  fi
+}
+
+stop_service() {
+  title 'Stopping systemd service...'
+  INFO "Stopping systemd service '${BEYONDCORP_SERVICE}'."
+  if ! sudo systemctl stop "${BEYONDCORP_SERVICE}"; then
+    WARN "Failed to stop systemd service '${BEYONDCORP_SERVICE}'. Continue."
+  fi
+  INFO "Disabling systemd service '${BEYONDCORP_SERVICE}'."
+  if ! sudo systemctl disable "${BEYONDCORP_SERVICE}"; then
+    WARN "Failed to disable systemd service '${BEYONDCORP_SERVICE}'. Continue."
+  fi
+}
+
+# main
+parse_flags "$@"
+if "${UNINSTALL}"; then
+  get_user
+  stop_service
+  uninstall
+  delete_user
+  title 'BeyondCorp Remote Agent has been successfully stopped and uninstalled.'
+  exit 0
+fi
+precondition_checks
+add_user
+install
+start_service
+install_complete_message
