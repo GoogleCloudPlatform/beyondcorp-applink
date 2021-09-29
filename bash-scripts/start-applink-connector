@@ -28,7 +28,7 @@ CONTAINER_PORT_MAPPING=''
 SERVICE_ACCOUNT=''
 START_FLUENTBIT_CONTAINER=''
 readonly FLUENTBIT_SCRIPT='start-fluentbit'
-readonly FLUENBIT_SCRIPT_URL='https://raw.githubusercontent.com/GoogleCloudPlatform/beyondcorp-applink/unstable/bash-scripts/start-fluentbit'
+readonly FLUENTBIT_SCRIPT_URL='https://raw.githubusercontent.com/GoogleCloudPlatform/beyondcorp-applink/unstable/bash-scripts/start-fluentbit'
 
 function usage () {
   cat << USAGE
