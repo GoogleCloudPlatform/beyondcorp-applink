@@ -43,3 +43,13 @@ resource "google_project_iam_member" "iap_tcp" {
 
   member = format("serviceAccount:%s", each.value)
 }
+
+# Create IAM binding to grant connector SAs logging.logWriter on the project.
+resource "google_project_iam_member" "log_writer" {
+  project  = var.project_id
+  for_each = local.service-account-set
+
+  role = "roles/logging.logWriter"
+
+  member = format("serviceAccount:%s", each.value)
+}

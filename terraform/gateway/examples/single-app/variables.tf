@@ -66,7 +66,7 @@ variable "iap_web_app_users" {
 variable "image" {
   description = "The Docker image to deploy to GCE instances"
   type        = string
-  default     = "gcr.io/cloud-applink-external-release/applink_gw:latest"
+  default     = "gcr.io/cloud-applink-external-release/applink_gw:unstable"
 }
 
 variable "connector_info" {
