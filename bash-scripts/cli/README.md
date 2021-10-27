@@ -7,15 +7,12 @@ BeyondCorp AppConnector in just a few commands and in a matter of minutes.
 
 ## Prerequisites
 
-1.  The CLI needs `jq` to function, so make sure to
-    [install it](https://stedolan.github.io/jq/) beforehand.
-2.  Have a GCP consumer project set up and ready to go in the region
+1.  Have a GCP consumer project set up and ready to go in the region
     `us-central1`, as this is the only supported region for now.
-3.  Have an
-    [OAuth brand](https://cloud.google.com/iap/docs/programmatic-oauth-clients)
-    set up.
-4.  IAP & Compute APIs need to be enabled.
-5.  Have your application that you want to protect with BeyondCorp AppConnector
+2.  Have a billing account set up for the above project.
+3.  [Set up](https://console.cloud.google.com/apis/credentials/consent) the
+    OAuth consent screen for the above project.
+4.  Have your application that you want to protect with BeyondCorp AppConnector
     ready.
 
 ## Usage
@@ -52,7 +49,7 @@ BeyondCorp AppConnector in just a few commands and in a matter of minutes.
     at that address on port `19443`.
 
     ```sh
-    $ ./beyondcorp.sh connections create <CONNECTION_NAME> -c <CONNECTOR_NAME> -h <APP_HOST> -p <APP_PORT>
+    $ ./beyondcorp.sh connections create <NAME> -c <CONNECTOR_NAME> -h <APP_HOST> -p <APP_PORT>
     ```
 
     In the above command, `CONNECTOR_NAME` is the name you used to create the
@@ -69,7 +66,7 @@ BeyondCorp AppConnector in just a few commands and in a matter of minutes.
     In the above command, `CONNECTION_NAME` is the name you used to create the
     connection in step 3, `-f` specifies the protocol your app will be accessed
     through on the internet, and `-b` specifies the protocol of the server
-    running your application. 
+    running your application.  
     
     As an example, if you want to
     publish using https on the domain `domain.com` (requires DNS to be set up

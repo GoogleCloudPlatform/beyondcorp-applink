@@ -52,6 +52,8 @@ usage_connectors() {
 
     connectors delete <NAME>                           Deletes a connector with NAME.
 
+    connectors get <NAME>                              Gets a connector with NAME.
+
     connectors list                                    Lists all existing connectors.
 
 USAGE
@@ -68,6 +70,8 @@ usage_connections() {
                                                        on-prem application.
 
     connections delete <NAME>                          Deletes a connection with NAME.
+
+    connections get <NAME>                             Gets a connection with NAME.
 
     connections list                                   Lists all existing connections.
 
@@ -155,13 +159,6 @@ warn() {
   echo -n "${YELLOW}${BOLD}WARNING: ${RESET}"
 }
 
-check_network() {
-  if ! [[ -f "$HOME/bce_network_settings" ]]; then
-    error && echo "Region and project ID must be specified, create a network first to set these parameters"
-    exit 1
-  fi
-}
-
 wait_for_operation() {
   local opname=$1
   info && echo "Operation name: $opname"
@@ -205,100 +202,45 @@ verify_no_extraneous_arguments() {
 oauth_brand_instructions() {
   cat <<EOM
 
-${MAGENTA}${BOLD}You do not have a Cloud OAuth brand for the project, run the following command to set it up:${RESET}
+${MAGENTA}${BOLD}You need a Cloud OAuth brand for the project and you currently do not have one set up.${RESET}
 
-${YELLOW}$ gcloud alpha iap oauth-brands create --application_title=<APPLICATION_TITLE> --support_email=<SUPPORT_EMAIL>
+${YELLOW}You can set it up in the Cloud Console at https://console.cloud.google.com/apis/credentials/consent.
+Make sure to select the project you are running this CLI with.
+
+Alternatively, you can run the following command to set it up:
+$ gcloud alpha iap oauth-brands create --application_title=<APPLICATION_TITLE> --support_email=<SUPPORT_EMAIL>
 See https://cloud.google.com/sdk/gcloud/reference/alpha/iap/oauth-brands/create for details.
 
 EOM
 }
 
-connectors_create() {
-  check_network
-  local connector_name="${1}"
-  gcloud iam service-accounts create "$connector_name"
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" --member serviceAccount:"${connector_name}"@"${PROJECT_ID}".iam.gserviceaccount.com --role roles/beyondcorp.connectionAgent
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" -X POST -d "{\"displayName\":\"${connector_name}\", \"principal_info\":{\"service_account\":{\"email\":\"${connector_name}@${PROJECT_ID}.iam.gserviceaccount.com\"}}}" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connectors?connector_id=${connector_name}")
-  opname=$(echo "$operation" | jq .name | tr -d \")
-  wait_for_operation "$opname"
-  cat <<EOM
-
-${MAGENTA}${BOLD}Login to the connector remote agent VM and run the following commands:${RESET}
-
-${YELLOW}$ curl https://raw.githubusercontent.com/GoogleCloudPlatform/beyondcorp-applink/main/bash-scripts/install-beyondcorp-runtime -o ./install-beyondcorp-runtime && chmod +x ./install-beyondcorp-runtime && ./install-beyondcorp-runtime -c projects/${PROJECT_ID}/locations/${REGION}/connectors/${connector_name} -s ${connector_name}@${PROJECT_ID}.iam.gserviceaccount.com
-
-$ docker exec bce-control-runtime /applink_control_runtime/bin/connctl enrollment create${RESET}
-
-EOM
-}
-
-connectors_delete() {
-  check_network
-  local connector_name="${1}"
-  gcloud projects remove-iam-policy-binding "${PROJECT_ID}" --member serviceAccount:"${connector_name}"@"${PROJECT_ID}".iam.gserviceaccount.com --role roles/beyondcorp.connectionAgent
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" -X DELETE "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connectors/${connector_name}")
-  opname=$(echo "$operation" | jq .name | tr -d \")
-  echo "$operation" | jq
-  wait_for_operation "$opname"
-  gcloud iam service-accounts delete "${connector_name}"@"${PROJECT_ID}".iam.gserviceaccount.com
-}
-
-connectors_list() {
-  check_network
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connectors")
-  echo "$operation" | jq
-}
-
-connections_create() {
-  check_network
-  local connection_name="${1}"
-  local connector_name="${2}"
-  local app_host="${3}"
-  local app_port="${4}"
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" -X POST -d "{type:\"TCP_PROXY\",application_endpoint:{host:\"${app_host}\",port:${app_port}},connectors:[\"projects/${PROJECT_ID}/locations/${REGION}/connectors/${connector_name}\"]}" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections?connection_id=${connection_name}")
-  opname=$(echo "$operation" | jq .name | tr -d \")
-  echo "$operation" | jq
-  wait_for_operation "$opname"
-  # TODO: remove tr -d '\\' after cl/398596292 is in prod
-  gw_uri=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections/${connection_name}" | jq .gateway.uri | tr -d \" | tr -d '\\')
-  success && echo "Created connection: PSC Service Attachment  ${gw_uri}"
-  info && echo "Attaching to the consumer VPC...."
-  gcloud compute addresses create "${connection_name}-vip" --region="${REGION}" --subnet="${SUBNET_NAME}"
-  gcloud beta compute forwarding-rules create "${connection_name}-psc-fr" --region="${REGION}" --network="${NETWORK_NAME}" --address="${connection_name}-vip" --target-service-attachment="${gw_uri}"
-}
-
-connections_delete() {
-  check_network
-  local connection_name="${1}"
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" -X DELETE "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections/${connection_name}")
-  opname=$(echo "$operation" | jq .name | tr -d \")
-  echo "$operation" | jq
-  wait_for_operation "$opname"
-  gcloud beta compute forwarding-rules delete "${connection_name}-psc-fr" --region="${REGION}"
-  gcloud compute addresses delete "${connection_name}-vip" --region="${REGION}"
-}
-
-connections_list() {
-  check_network
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections")
-  echo "$operation" | jq
-}
-
-port_alloc() {
-  network_file=${HOME}/bce_network_settings_port
-  start_port=20000
-  local port=20000
-  if [[ ! -f "$network_file" ]]; then
-    echo "$start_port" >"$network_file"
+init() {
+  if ! command -v gcloud &>/dev/null; then
+    error && echo "The BeyondCorp CLI requires ${BOLD}gcloud${RESET} to function, please see https://cloud.google.com/sdk/docs/install for installation."
+    exit 1
   fi
-  port=$(cat "$network_file")
-  next_port="$((port + 1))"
-  echo "$next_port" >"$network_file"
-  echo "$port"
+  if ! command -v jq &>/dev/null; then
+    error && echo "The BeyondCorp CLI requires ${BOLD}jq${RESET} to function, please see https://stedolan.github.io/jq/download/ for installation."
+    exit 1
+  fi
+  if ! command -v dig &>/dev/null; then
+    error && echo "The BeyondCorp CLI requires ${BOLD}dig${RESET} to function, make sure to install it before using the CLI."
+    exit 1
+  fi
+  set -e
+  gcloud config set project "$1"
+  info && echo "Checking if all necessary APIs are enabled for your project...We will automatically enable any that are not."
+  gcloud services enable compute.googleapis.com
+  gcloud services enable beyondcorp.googleapis.com
+  gcloud services enable iap.googleapis.com
+  gcloud services enable cloudresourcemanager.googleapis.com
+  gcloud services enable deploymentmanager.googleapis.com
+  set +e
 }
 
 # TODO: explore using nftables in place of iptables
 network_create() {
+  init "$3"
   local network_name="${1}"
   NETWORK_NAME=${network_name}-network
   SUBNET_NAME=${network_name}-subnet
@@ -337,8 +279,6 @@ COMMIT"
   consul agent -dev &
   consul-template -template \"/var/beyondcorp/iptables.tpl:/var/beyondcorp/iptables.txt:sudo iptables-restore < /var/beyondcorp/iptables.txt\" &"
 
-  # Compute API depends on the project in gcloud config.
-  gcloud config set project "${PROJECT_ID}"
   gcloud compute networks create "${NETWORK_NAME}" --subnet-mode=custom
   gcloud compute networks subnets create "${SUBNET_NAME}" --network="${NETWORK_NAME}" --range=10.9.2.0/24 --region="${REGION}"
   gcloud compute instances create nat-vm-"${SUBNET_NAME}" --zone="${REGION}"-a --image-family=debian-10 --image-project=debian-cloud --subnet="${SUBNET_NAME}" --metadata=startup-script="$startup"
@@ -353,8 +293,9 @@ COMMIT"
     ready2=$(gcloud compute ssh --command 'echo ready' "nat-vm-${SUBNET_NAME}"-ha --zone "${REGION}" 2>&1 | grep ready)
     if [[ "$ready" == "ready" ]] && [[ "$ready2" == "ready" ]]; then
       vm_reachable="true"
+      success && echo "VMs are ready"
     else
-      info && echo "Waiting for the VM to be reachable via IAP TCP....sleep for $sleep_intvl sec"
+      info && echo "Waiting for the VMs to be reachable via IAP TCP....sleep for $sleep_intvl sec"
       sleep $sleep_intvl
       num_retries=$((num_retries - 1))
       if [[ $num_retries -eq 0 ]]; then
@@ -396,6 +337,111 @@ network_list() {
     return
   fi
   error && echo "${HOME}/bce_network_settings cannot be found"
+}
+
+check_network() {
+  if ! [[ -f "$HOME/bce_network_settings" ]]; then
+    error && echo "You need to first create a network to perform this action."
+    exit 1
+  fi
+}
+
+connectors_create() {
+  check_network
+  local connector_name="${1}"
+  gcloud iam service-accounts create "$connector_name"
+  gcloud projects add-iam-policy-binding "$PROJECT_ID" --member serviceAccount:"${connector_name}"@"${PROJECT_ID}".iam.gserviceaccount.com --role roles/beyondcorp.connectionAgent
+  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" -X POST -d "{\"displayName\":\"${connector_name}\", \"principal_info\":{\"service_account\":{\"email\":\"${connector_name}@${PROJECT_ID}.iam.gserviceaccount.com\"}}}" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connectors?connector_id=${connector_name}")
+  opname=$(echo "$operation" | jq .name | tr -d \")
+  wait_for_operation "$opname"
+  cat <<EOM
+
+${MAGENTA}${BOLD}Log in to the connector remote agent VM and run the following commands:${RESET}
+
+${YELLOW}$ curl https://raw.githubusercontent.com/GoogleCloudPlatform/beyondcorp-applink/main/bash-scripts/install-beyondcorp-runtime -o ./install-beyondcorp-runtime && chmod +x ./install-beyondcorp-runtime && ./install-beyondcorp-runtime -c projects/${PROJECT_ID}/locations/${REGION}/connectors/${connector_name} -s ${connector_name}@${PROJECT_ID}.iam.gserviceaccount.com
+
+$ docker exec bce-control-runtime /applink_control_runtime/bin/connctl enrollment create${RESET}
+
+EOM
+}
+
+connectors_delete() {
+  check_network
+  local connector_name="${1}"
+  gcloud projects remove-iam-policy-binding "${PROJECT_ID}" --member serviceAccount:"${connector_name}"@"${PROJECT_ID}".iam.gserviceaccount.com --role roles/beyondcorp.connectionAgent
+  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" -X DELETE "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connectors/${connector_name}")
+  opname=$(echo "$operation" | jq .name | tr -d \")
+  echo "$operation" | jq
+  wait_for_operation "$opname"
+  gcloud iam service-accounts delete "${connector_name}"@"${PROJECT_ID}".iam.gserviceaccount.com
+}
+
+connectors_get() {
+  check_network
+  local connector_name="${1}"
+  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connectors/${connector_name}")
+  echo "$operation" | jq
+}
+
+connectors_list() {
+  check_network
+  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connectors")
+  echo "$operation" | jq
+}
+
+connections_create() {
+  check_network
+  local connection_name="${1}"
+  local connector_name="${2}"
+  local app_host="${3}"
+  local app_port="${4}"
+  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" -X POST -d "{type:\"TCP_PROXY\",application_endpoint:{host:\"${app_host}\",port:${app_port}},connectors:[\"projects/${PROJECT_ID}/locations/${REGION}/connectors/${connector_name}\"]}" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections?connection_id=${connection_name}")
+  opname=$(echo "$operation" | jq .name | tr -d \")
+  echo "$operation" | jq
+  wait_for_operation "$opname"
+  # TODO: remove tr -d '\\' after cl/398596292 is in prod
+  gw_uri=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections/${connection_name}" | jq .gateway.uri | tr -d \" | tr -d '\\')
+  success && echo "Created connection: PSC Service Attachment  ${gw_uri}"
+  info && echo "Attaching to the consumer VPC...."
+  gcloud compute addresses create "${connection_name}-vip" --region="${REGION}" --subnet="${SUBNET_NAME}"
+  gcloud beta compute forwarding-rules create "${connection_name}-psc-fr" --region="${REGION}" --network="${NETWORK_NAME}" --address="${connection_name}-vip" --target-service-attachment="${gw_uri}"
+}
+
+connections_delete() {
+  check_network
+  local connection_name="${1}"
+  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" -X DELETE "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections/${connection_name}")
+  opname=$(echo "$operation" | jq .name | tr -d \")
+  echo "$operation" | jq
+  wait_for_operation "$opname"
+  gcloud beta compute forwarding-rules delete "${connection_name}-psc-fr" --region="${REGION}"
+  gcloud compute addresses delete "${connection_name}-vip" --region="${REGION}"
+}
+
+connections_get() {
+  check_network
+  local connection_name="${1}"
+  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections/${connection_name}")
+  echo "$operation" | jq
+}
+
+connections_list() {
+  check_network
+  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections")
+  echo "$operation" | jq
+}
+
+port_alloc() {
+  network_file=${HOME}/bce_network_settings_port
+  start_port=20000
+  local port=20000
+  if [[ ! -f "$network_file" ]]; then
+    echo "$start_port" >"$network_file"
+  fi
+  port=$(cat "$network_file")
+  next_port="$((port + 1))"
+  echo "$next_port" >"$network_file"
+  echo "$port"
 }
 
 publish_app() {
@@ -551,6 +597,11 @@ parse_connectors() {
     verify_no_name
     connectors_list
     ;;
+  "get")
+    verify_name
+    verify_no_extraneous_arguments "$@"
+    connectors_get "$NAME"
+    ;;
   "-h" | "--help")
     usage_connectors
     ;;
@@ -600,6 +651,11 @@ parse_connections() {
   "list")
     verify_no_name
     connections_list
+    ;;
+  "get")
+    verify_name
+    verify_no_extraneous_arguments "$@"
+    connections_get "$NAME"
     ;;
   "-h" | "--help")
     usage_connections
@@ -745,11 +801,6 @@ main() {
     ;;
   esac
 }
-
-if ! command -v jq &>/dev/null; then
-  error && echo "The BeyondCorp CLI requires ${BOLD}jq${RESET} to function, please see https://stedolan.github.io/jq/download/ for installation."
-  exit 1
-fi
 
 # Load the required variables from the settings file if it exists
 if [[ -f "$HOME/bce_network_settings" ]]; then
