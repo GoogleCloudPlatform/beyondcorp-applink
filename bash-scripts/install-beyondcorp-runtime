@@ -21,7 +21,7 @@ set -euo pipefail
 
 readonly BEYONDCORP_REPOSITORIES='gcr.io/appconnector-external-release'
 readonly REMOTE_AGENT_REPOSITORY="${BEYONDCORP_REPOSITORIES}/appconnector_remote_cp"
-readonly REMOTE_AGENT_TAG='appconnector_remote_cp_20210915_RC00'
+readonly REMOTE_AGENT_TAG='appconnector_remote_cp_20211029_rc00'
 readonly REMOTE_AGENT_INSTALLER_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
 readonly REMOTE_AGENT_RUNNER_TARGET_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
 readonly REMOTE_AGENT_RUNNER_STABLE_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
@@ -31,9 +31,10 @@ readonly BEYONDCORP_CONTAINERS=("${REMOTE_AGENT_CONTAINER}" 'bce-connector' 'bce
 readonly BEYONDCORP_SERVICE='beyondcorp'
 readonly BEYONDCORP_DIR='/var/beyondcorp'
 
+readonly COLOR_GREEN='\033[32m'
+readonly COLOR_RESET='\033[0m'
+
 BEYONDCORP_USER='beyondcorp'
-CONNECTOR_NAME=''
-SERVICE_ACCOUNT=''
 UNINSTALL='false'
 
 # logger
@@ -60,31 +61,33 @@ title() {
 usage() {
   cat << USAGE
   Configure and start beyondcorp remote agent installer
-  Usage: $0 [-u <beyondcorp_user>] -c <connector_name> -s <service_account> [-r]
+  Usage: $0 [-u <beyondcorp_user>] [-r]
   -h                       Print this help message.
   -u <beyondcorp_user>     The user the beyondcorp remote agent will run as.
                            Default is "${BEYONDCORP_USER}" if not specified.
-  -c <connector_name>      The connector name using the form
-                           "projects/{project_id}/locations/{location_id}/connectors/{connector_id}".
-  -s <service_account>     The service account email to use for authentication
-                           (sa-name@project-id.iam.gserviceaccount.com)
   -r <uninstall>           Uninstall beyondcorp remote agent.
                            No other flags are required.
 USAGE
 }
 
 install_complete_message() {
-  cat << INSTALL_COMPLETE_MESSAGE
-#################################################################################
-# BeyondCorp Remote Agent has been successfully installed and started.          #
-#                                                                               #
-# Instructions:                                                                 #
-# ----------------------------------------------------------------------------- #
-# |Stop  | sudo systemctl stop beyondcorp & sudo systemctl disable beyondcorp | #
-# |Start | sudo systemctl start beyondcorp & sudo systemctl enable beyondcorp | #
-# ----------------------------------------------------------------------------- #
-#################################################################################
-INSTALL_COMPLETE_MESSAGE
+  local message
+  message="$(cat << EOM
+###############################################################################
+# BeyondCorp Remote Agent has been successfully installed and started.        #
+# Please run the following command to finish enrolling the remote agent:      #
+# $ bce-connctl init                                                          #
+#                                                                             #
+# Other BeyondCorp service commands:                                          #
+# --------------------------------------------------------------------------- #
+# sudo systemctl stop beyondcorp & sudo systemctl disable beyondcorp | stop   #
+# sudo systemctl start beyondcorp & sudo systemctl enable beyondcorp | start  #
+# sudo systemctl status beyondcorp                                   | status #
+# --------------------------------------------------------------------------- #
+###############################################################################
+EOM
+)"
+  printf "%b%s%b\n" "${COLOR_GREEN}" "${message}" "${COLOR_RESET}"
 }
 
 forbid_empty_flag() {
@@ -105,8 +108,6 @@ parse_flags() {
         exit 0
         ;;
       u) BEYONDCORP_USER="${OPTARG}" ;;
-      c) CONNECTOR_NAME="${OPTARG}" ;;
-      s) SERVICE_ACCOUNT="${OPTARG}" ;;
       r) UNINSTALL='true' ;;
       ?)
         usage >&2
@@ -118,8 +119,6 @@ parse_flags() {
     return 0
   fi
   forbid_empty_flag "${BEYONDCORP_USER}" "<beyondcorp_user>"
-  forbid_empty_flag "${CONNECTOR_NAME}" "<connector_name>"
-  forbid_empty_flag "${SERVICE_ACCOUNT}" "<service_account>"
 }
 
 # 2. checks
@@ -213,8 +212,6 @@ docker_flags=(
 install() {
   title 'Installing BeyondCorp Remote Agent...'
   installer_flags=(
-    --connector_name="${CONNECTOR_NAME}"
-    --service_account="${SERVICE_ACCOUNT}"
     --target_image="${REMOTE_AGENT_RUNNER_TARGET_IMAGE}"
     --stable_image="${REMOTE_AGENT_RUNNER_STABLE_IMAGE}"
     --shell="$(ps -p $PPID -o fname --no-headers)"
@@ -241,6 +238,9 @@ uninstall() {
   title 'Uninstalling BeyondCorp Remote Agent...'
   installer_flags=(
     --uninstall="true"
+    # If user removed ~/.bce_alias before uninstall, we rely on `shell` to
+    # locate the shell rc.
+    --shell="$(ps -p $PPID -o fname --no-headers)"
   )
   # uninstall directories and files.
   if ! docker run --rm "${docker_flags[@]}" "${REMOTE_AGENT_INSTALLER_IMAGE}" "${installer_flags[@]}"; then
