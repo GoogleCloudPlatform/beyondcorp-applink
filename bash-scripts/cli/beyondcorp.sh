@@ -127,7 +127,7 @@ USAGE
 usage() {
   less -R <<USAGE
 
-  ${BOLD}Usage: $0 <RESOURCE> <OPERATION> [NAME] [flags]
+  ${BOLD}Usage: $0 <RESOURCE> <OPERATION> <NAME> [flags]
 
   ${BOLD}Network
   $(usage_network)
@@ -238,7 +238,6 @@ init() {
   set +e
 }
 
-# TODO: explore using nftables in place of iptables
 network_create() {
   init "$3"
   local network_name="${1}"
@@ -268,7 +267,6 @@ COMMIT
 :OUTPUT ACCEPT [0:0]
 COMMIT"
 
-  # TODO: rollback behavior
   startup="sudo apt-get install consul
   curl https://releases.hashicorp.com/consul-template/0.27.0/consul-template_0.27.0_linux_amd64.zip --output consul-template_0.27.0_linux_amd64.zip
   sudo apt-get install unzip
@@ -358,9 +356,12 @@ connectors_create() {
 
 ${MAGENTA}${BOLD}Log in to the connector remote agent VM and run the following commands:${RESET}
 
-${YELLOW}$ curl https://raw.githubusercontent.com/GoogleCloudPlatform/beyondcorp-applink/main/bash-scripts/install-beyondcorp-runtime -o ./install-beyondcorp-runtime && chmod +x ./install-beyondcorp-runtime && ./install-beyondcorp-runtime -c projects/${PROJECT_ID}/locations/${REGION}/connectors/${connector_name} -s ${connector_name}@${PROJECT_ID}.iam.gserviceaccount.com
+${YELLOW}$ curl https://raw.githubusercontent.com/GoogleCloudPlatform/beyondcorp-applink/main/bash-scripts/install-beyondcorp-runtime -o ./install-beyondcorp-runtime && chmod +x ./install-beyondcorp-runtime && ./install-beyondcorp-runtime
 
-$ docker exec bce-control-runtime /applink_control_runtime/bin/connctl enrollment create${RESET}
+$ bce-connctl config set project ${PROJECT_ID}
+  bce-connctl config set region ${REGION}
+  bce-connctl config set connector ${connector_name}
+  bce-connctl enrollment create${RESET}
 
 EOM
 }
@@ -399,7 +400,6 @@ connections_create() {
   opname=$(echo "$operation" | jq .name | tr -d \")
   echo "$operation" | jq
   wait_for_operation "$opname"
-  # TODO: remove tr -d '\\' after cl/398596292 is in prod
   gw_uri=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections/${connection_name}" | jq .gateway.uri | tr -d \" | tr -d '\\')
   success && echo "Created connection: PSC Service Attachment  ${gw_uri}"
   info && echo "Attaching to the consumer VPC...."
@@ -670,7 +670,6 @@ parse_connections() {
   esac
 }
 
-# TODO: add app list cmd
 parse_app() {
   case "${OP}" in
   "publish")
