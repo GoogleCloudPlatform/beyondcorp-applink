@@ -127,7 +127,7 @@ USAGE
 usage() {
   less -R <<USAGE
 
-  ${BOLD}Usage: $0 <RESOURCE> <OPERATION> [NAME] [flags]
+  ${BOLD}Usage: $0 <RESOURCE> <OPERATION> <NAME> [flags]
 
   ${BOLD}Network
   $(usage_network)
@@ -358,9 +358,12 @@ connectors_create() {
 
 ${MAGENTA}${BOLD}Log in to the connector remote agent VM and run the following commands:${RESET}
 
-${YELLOW}$ curl https://raw.githubusercontent.com/GoogleCloudPlatform/beyondcorp-applink/main/bash-scripts/install-beyondcorp-runtime -o ./install-beyondcorp-runtime && chmod +x ./install-beyondcorp-runtime && ./install-beyondcorp-runtime -c projects/${PROJECT_ID}/locations/${REGION}/connectors/${connector_name} -s ${connector_name}@${PROJECT_ID}.iam.gserviceaccount.com
+${YELLOW}$ curl https://raw.githubusercontent.com/GoogleCloudPlatform/beyondcorp-applink/main/bash-scripts/install-beyondcorp-runtime -o ./install-beyondcorp-runtime && chmod +x ./install-beyondcorp-runtime && ./install-beyondcorp-runtime
 
-$ docker exec bce-control-runtime /applink_control_runtime/bin/connctl enrollment create${RESET}
+$ bce-connctl config set project ${PROJECT_ID}
+  bce-connctl config set region ${REGION}
+  bce-connctl config set connector ${connector_name}
+  bce-connctl enrollment create${RESET}
 
 EOM
 }
