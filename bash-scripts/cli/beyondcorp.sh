@@ -52,7 +52,7 @@ usage_connectors() {
 
     connectors delete <NAME>                           Deletes a connector with NAME.
 
-    connectors get <NAME>                              Gets a connector with NAME.
+    connectors describe <NAME>                         Describes a connector with NAME.
 
     connectors list                                    Lists all existing connectors.
 
@@ -62,16 +62,17 @@ USAGE
 usage_connections() {
   cat <<USAGE
 
-    connections create <NAME> -c <CONNECTOR_NAME> -h <APP_HOST> -p <APP_PORT>
+    connections create <NAME> -c <CONNECTOR_NAME,...> -h <APP_HOST> -p <APP_PORT>
 
                                                        Creates a new connection with NAME that
-                                                       uses the specified connector. APP_HOST
-                                                       and APP_PORT specify the location of the
+                                                       uses the specified connectors. Connectors
+                                                       are a comma-separated list. APP_HOST and
+                                                       APP_PORT specify the location of the
                                                        on-prem application.
 
     connections delete <NAME>                          Deletes a connection with NAME.
 
-    connections get <NAME>                             Gets a connection with NAME.
+    connections describe <NAME>                        Describes a connection with NAME.
 
     connections list                                   Lists all existing connections.
 
@@ -159,20 +160,6 @@ warn() {
   echo -n "${YELLOW}${BOLD}WARNING: ${RESET}"
 }
 
-wait_for_operation() {
-  local opname=$1
-  info && echo "Operation name: $opname"
-  while true; do
-    done="$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" "https://beyondcorp.googleapis.com/v1alpha/${opname}" | jq .done)"
-    if [[ "$done" == "true" ]]; then
-      success && echo "Operation completed"
-      break
-    fi
-    info && echo "Operation in progress"
-    sleep 10
-  done
-}
-
 verify_name() {
   if [[ -z $NAME ]] || [[ $NAME == -* ]]; then
     if [[ $NAME == "-h" ]] || [[ $NAME == "--help" ]]; then
@@ -214,19 +201,42 @@ See https://cloud.google.com/sdk/gcloud/reference/alpha/iap/oauth-brands/create 
 EOM
 }
 
+check_dependency() {
+  # check existence.
+  local name="${1}"
+  local install_error_message="The BeyondCorp CLI requires ${BOLD}${name}${RESET} to function, ${2}"
+  if ! command -v "${name}" &>/dev/null; then
+    error && echo "${install_error_message}"
+    exit 1
+  fi
+  if [[ "${#}" -eq 2 ]]; then
+    return 0
+  fi
+  # check version.
+  local minimum_version="${3}"
+  local version_pattern="${4}"
+  local update_error_message="The BeyondCorp CLI requires version of ${BOLD}${name} >= ${minimum_version}${RESET}, ${5}"
+  local current_version
+  if ! current_version="$("${name}" --version 2> /dev/null)"; then
+    error && echo "failed to get the version of ${name}"
+    exit 1
+  fi
+  local current
+  current="$(echo "${current_version}" | grep -oP "${version_pattern}")"
+  if [[ "$(printf '%s\n' "${minimum_version}" "${current}" | sort -V | head -n1)" != "${minimum_version}" ]]; then
+    error && echo "${update_error_message}"
+    exit 1
+  fi
+}
+
+check_dependencies() {
+  check_dependency "gcloud" "please see https://cloud.google.com/sdk/docs/install for installation." \
+    "363.0.0" "Google Cloud SDK \K.+" "please see https://cloud.google.com/sdk/gcloud/reference/components/update for update."
+  check_dependency "jq" "please see https://stedolan.github.io/jq/download/ for installation."
+  check_dependency "dig" "make sure to install it before using the CLI."
+}
+
 init() {
-  if ! command -v gcloud &>/dev/null; then
-    error && echo "The BeyondCorp CLI requires ${BOLD}gcloud${RESET} to function, please see https://cloud.google.com/sdk/docs/install for installation."
-    exit 1
-  fi
-  if ! command -v jq &>/dev/null; then
-    error && echo "The BeyondCorp CLI requires ${BOLD}jq${RESET} to function, please see https://stedolan.github.io/jq/download/ for installation."
-    exit 1
-  fi
-  if ! command -v dig &>/dev/null; then
-    error && echo "The BeyondCorp CLI requires ${BOLD}dig${RESET} to function, make sure to install it before using the CLI."
-    exit 1
-  fi
   set -e
   gcloud config set project "$1"
   info && echo "Checking if all necessary APIs are enabled for your project...We will automatically enable any that are not."
@@ -238,6 +248,7 @@ init() {
   set +e
 }
 
+# TODO: explore using nftables in place of iptables
 network_create() {
   init "$3"
   local network_name="${1}"
@@ -267,6 +278,7 @@ COMMIT
 :OUTPUT ACCEPT [0:0]
 COMMIT"
 
+  # TODO: rollback behavior
   startup="sudo apt-get install consul
   curl https://releases.hashicorp.com/consul-template/0.27.0/consul-template_0.27.0_linux_amd64.zip --output consul-template_0.27.0_linux_amd64.zip
   sudo apt-get install unzip
@@ -347,11 +359,16 @@ check_network() {
 connectors_create() {
   check_network
   local connector_name="${1}"
-  gcloud iam service-accounts create "$connector_name"
-  gcloud projects add-iam-policy-binding "$PROJECT_ID" --member serviceAccount:"${connector_name}"@"${PROJECT_ID}".iam.gserviceaccount.com --role roles/beyondcorp.connectionAgent
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" -X POST -d "{\"displayName\":\"${connector_name}\", \"principal_info\":{\"service_account\":{\"email\":\"${connector_name}@${PROJECT_ID}.iam.gserviceaccount.com\"}}}" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connectors?connector_id=${connector_name}")
-  opname=$(echo "$operation" | jq .name | tr -d \")
-  wait_for_operation "$opname"
+  local member="serviceAccount:${connector_name}@${PROJECT_ID}.iam.gserviceaccount.com"
+  gcloud iam service-accounts create "${connector_name}"
+  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member "${member}" \
+    --role roles/beyondcorp.connectionAgent
+  gcloud alpha beyondcorp app connectors create "${connector_name}" \
+    --project "${PROJECT_ID}" \
+    --location "${REGION}" \
+    --member "${member}" \
+    --display-name "${connector_name}"
   cat <<EOM
 
 ${MAGENTA}${BOLD}Log in to the connector remote agent VM and run the following commands:${RESET}
@@ -369,38 +386,46 @@ EOM
 connectors_delete() {
   check_network
   local connector_name="${1}"
-  gcloud projects remove-iam-policy-binding "${PROJECT_ID}" --member serviceAccount:"${connector_name}"@"${PROJECT_ID}".iam.gserviceaccount.com --role roles/beyondcorp.connectionAgent
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" -X DELETE "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connectors/${connector_name}")
-  opname=$(echo "$operation" | jq .name | tr -d \")
-  echo "$operation" | jq
-  wait_for_operation "$opname"
-  gcloud iam service-accounts delete "${connector_name}"@"${PROJECT_ID}".iam.gserviceaccount.com
+  local service_account="${connector_name}@${PROJECT_ID}.iam.gserviceaccount.com"
+  gcloud projects remove-iam-policy-binding "${PROJECT_ID}" \
+    --member "serviceAccount:${service_account}" \
+    --role roles/beyondcorp.connectionAgent
+  gcloud alpha beyondcorp app connectors delete "${connector_name}" \
+    --project "${PROJECT_ID}" \
+    --location "${REGION}"
+  gcloud iam service-accounts delete "${service_account}"
 }
 
-connectors_get() {
+connectors_describe() {
   check_network
   local connector_name="${1}"
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connectors/${connector_name}")
-  echo "$operation" | jq
+  gcloud alpha beyondcorp app connectors describe "${connector_name}" \
+    --project "${PROJECT_ID}" \
+    --location "${REGION}" | jq
 }
 
 connectors_list() {
   check_network
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connectors")
-  echo "$operation" | jq
+  gcloud alpha beyondcorp app connectors list \
+    --project "${PROJECT_ID}" \
+    --location "${REGION}"
 }
 
 connections_create() {
   check_network
   local connection_name="${1}"
-  local connector_name="${2}"
+  local connector_names="${2}"
   local app_host="${3}"
   local app_port="${4}"
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" -X POST -d "{type:\"TCP_PROXY\",application_endpoint:{host:\"${app_host}\",port:${app_port}},connectors:[\"projects/${PROJECT_ID}/locations/${REGION}/connectors/${connector_name}\"]}" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections?connection_id=${connection_name}")
-  opname=$(echo "$operation" | jq .name | tr -d \")
-  echo "$operation" | jq
-  wait_for_operation "$opname"
-  gw_uri=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections/${connection_name}" | jq .gateway.uri | tr -d \" | tr -d '\\')
+  gcloud alpha beyondcorp app connections create "${connection_name}" \
+    --project "${PROJECT_ID}" \
+    --location "${REGION}" \
+    --application-endpoint "${app_host}:${app_port}" \
+    --type "tcp" \
+    --connectors "${connector_names}" \
+    --display-name "${connection_name}"
+
+  gw_uri="$(connections_describe "${connection_name}" | jq -r .gateway.uri)"
   success && echo "Created connection: PSC Service Attachment  ${gw_uri}"
   info && echo "Attaching to the consumer VPC...."
   gcloud compute addresses create "${connection_name}-vip" --region="${REGION}" --subnet="${SUBNET_NAME}"
@@ -410,25 +435,26 @@ connections_create() {
 connections_delete() {
   check_network
   local connection_name="${1}"
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" -X DELETE "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections/${connection_name}")
-  opname=$(echo "$operation" | jq .name | tr -d \")
-  echo "$operation" | jq
-  wait_for_operation "$opname"
+  gcloud alpha beyondcorp app connections delete "${connection_name}" \
+    --project "${PROJECT_ID}" \
+    --location "${REGION}"
   gcloud beta compute forwarding-rules delete "${connection_name}-psc-fr" --region="${REGION}"
   gcloud compute addresses delete "${connection_name}-vip" --region="${REGION}"
 }
 
-connections_get() {
+connections_describe() {
   check_network
   local connection_name="${1}"
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections/${connection_name}")
-  echo "$operation" | jq
+  gcloud alpha beyondcorp app connections describe "${connection_name}" \
+    --project="${PROJECT_ID}" \
+    --location="${REGION}" | jq
 }
 
 connections_list() {
   check_network
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections")
-  echo "$operation" | jq
+  gcloud alpha beyondcorp app connections list \
+    --project="${PROJECT_ID}" \
+    --location="${REGION}"
 }
 
 port_alloc() {
@@ -585,22 +611,22 @@ parse_connectors() {
   case "${OP}" in
   "create")
     verify_name
-    verify_no_extraneous_arguments "$@"
-    connectors_create "$NAME"
+    verify_no_extraneous_arguments "${@}"
+    connectors_create "${NAME}"
     ;;
   "delete")
     verify_name
-    verify_no_extraneous_arguments "$@"
-    connectors_delete "$NAME"
+    verify_no_extraneous_arguments "${@}"
+    connectors_delete "${NAME}"
     ;;
   "list")
     verify_no_name
     connectors_list
     ;;
-  "get")
+  "describe")
     verify_name
-    verify_no_extraneous_arguments "$@"
-    connectors_get "$NAME"
+    verify_no_extraneous_arguments "${@}"
+    connectors_describe "${NAME}"
     ;;
   "-h" | "--help")
     usage_connectors
@@ -622,13 +648,13 @@ parse_connections() {
     while getopts ":c:h:p:" o; do
       case "${o}" in
       c)
-        local connector_name=${OPTARG}
+        local connector_names="${OPTARG}"
         ;;
       h)
-        local host=${OPTARG}
+        local host="${OPTARG}"
         ;;
       p)
-        local port=${OPTARG}
+        local port="${OPTARG}"
         ;;
       *)
         error && echo "Unrecognized argument: -${OPTARG}"
@@ -636,26 +662,26 @@ parse_connections() {
         ;;
       esac
     done
-    verify_no_extraneous_arguments "$@"
-    if [[ -z $connector_name ]] || [[ -z $host ]] || [[ -z $port ]]; then
-      error && echo "-c -h -p must be specified: -c <CONNECTOR_NAME> -h <APP_HOST> -p <APP_PORT>"
+    verify_no_extraneous_arguments "${@}"
+    if [[ -z "${connector_names}" ]] || [[ -z "${host}" ]] || [[ -z "${port}" ]]; then
+      error && echo "-c -h -p must be specified: -c <CONNECTOR_NAME,...> -h <APP_HOST> -p <APP_PORT>"
       exit 1
     fi
-    connections_create "$NAME" "$connector_name" "$host" "$port"
+    connections_create "${NAME}" "${connector_names}" "${host}" "${port}"
     ;;
   "delete")
     verify_name
-    verify_no_extraneous_arguments "$@"
-    connections_delete "$NAME"
+    verify_no_extraneous_arguments "${@}"
+    connections_delete "${NAME}"
     ;;
   "list")
     verify_no_name
     connections_list
     ;;
-  "get")
+  "describe")
     verify_name
-    verify_no_extraneous_arguments "$@"
-    connections_get "$NAME"
+    verify_no_extraneous_arguments "${@}"
+    connections_describe "${NAME}"
     ;;
   "-h" | "--help")
     usage_connections
@@ -670,6 +696,7 @@ parse_connections() {
   esac
 }
 
+# TODO: add app list cmd
 parse_app() {
   case "${OP}" in
   "publish")
@@ -773,6 +800,8 @@ parse_app() {
 }
 
 main() {
+  check_dependencies
+
   OPTIND=4
   case "${RESOURCE}" in
   "network")
@@ -803,10 +832,10 @@ main() {
 
 # Load the required variables from the settings file if it exists
 if [[ -f "$HOME/bce_network_settings" ]]; then
-  NETWORK_NAME=$(grep 'network' "$HOME/bce_network_settings" | cut -f 2 -d=)
-  SUBNET_NAME=$(grep 'subnet' "$HOME/bce_network_settings" | cut -f 2 -d=)
-  REGION=$(grep 'region' "$HOME/bce_network_settings" | cut -f 2 -d=)
-  PROJECT_ID=$(grep 'project' "$HOME/bce_network_settings" | cut -f 2 -d=)
+  NETWORK_NAME=$(grep '^network=' "$HOME/bce_network_settings" | cut -f 2 -d=)
+  SUBNET_NAME=$(grep '^subnet=' "$HOME/bce_network_settings" | cut -f 2 -d=)
+  REGION=$(grep '^region=' "$HOME/bce_network_settings" | cut -f 2 -d=)
+  PROJECT_ID=$(grep '^project=' "$HOME/bce_network_settings" | cut -f 2 -d=)
 fi
 
 main "$@"
