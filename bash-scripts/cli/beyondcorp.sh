@@ -248,7 +248,6 @@ init() {
   set +e
 }
 
-# TODO: explore using nftables in place of iptables
 network_create() {
   init "$3"
   local network_name="${1}"
@@ -278,7 +277,6 @@ COMMIT
 :OUTPUT ACCEPT [0:0]
 COMMIT"
 
-  # TODO: rollback behavior
   startup="sudo apt-get install consul
   curl https://releases.hashicorp.com/consul-template/0.27.0/consul-template_0.27.0_linux_amd64.zip --output consul-template_0.27.0_linux_amd64.zip
   sudo apt-get install unzip
@@ -696,7 +694,6 @@ parse_connections() {
   esac
 }
 
-# TODO: add app list cmd
 parse_app() {
   case "${OP}" in
   "publish")
