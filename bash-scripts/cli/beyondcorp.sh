@@ -79,10 +79,10 @@ usage_connections() {
 USAGE
 }
 
-usage_app() {
+usage_apps() {
   cat <<USAGE
 
-    app publish <CONNECTION_NAME> -f <http|https> -b <http|https> [optional_flags]
+    apps publish <CONNECTION_NAME> -f <http|https> -b <http|https> [optional_flags]
 
                                                        Publishes a connection and make the
                                                        on-prem application reachable via the
@@ -118,9 +118,9 @@ usage_app() {
                                                        Only used if IAP is enabled.
 
 
-    app unpublish <CONNECTION_NAME> -f <http|https>    Unpublishes the connection. The frontend
-                                                       protocol with which the connection was
-                                                       originally published needs to be specified.
+    apps unpublish <CONNECTION_NAME>                   Unpublishes the connection.
+
+    apps list                                          Lists published apps.
 
 USAGE
 }
@@ -139,8 +139,8 @@ usage() {
   ${BOLD}Connections
   $(usage_connections)
 
-  ${BOLD}App
-  $(usage_app)
+  ${BOLD}Apps
+  $(usage_apps)
 USAGE
 }
 
@@ -468,7 +468,7 @@ port_alloc() {
   echo "$port"
 }
 
-publish_app() {
+apps_publish() {
   check_network
   local connection_name="${1}"
   local frontend_protocol="${2}"
@@ -478,8 +478,9 @@ publish_app() {
   local iap="${6}"
   local groups="${7}"
   local users="${8}"
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections/${connection_name}" | jq -r .error.status)
-  if [[ ${operation} == "NOT_FOUND" ]]; then
+  if ! gcloud alpha beyondcorp app connections describe "${connection_name}" \
+      --project="${PROJECT_ID}" \
+      --location="${REGION}" &>/dev/null; then
     error && echo "Connection ${connection_name} was not found."
     return 1
   fi
@@ -529,33 +530,53 @@ publish_app() {
   fi
 }
 
-unpublish_app() {
+apps_unpublish() {
   check_network
   local connection_name="${1}"
-  local frontend_protocol="${2}"
-  operation=$(curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" -H "Content-Type: application/json" "https://beyondcorp.googleapis.com/v1alpha/projects/${PROJECT_ID}/locations/${REGION}/connections/${connection_name}" | jq -r .error.status)
-  if [[ ${operation} == "NOT_FOUND" ]]; then
-    error && echo "Connection ${connection_name} was not found"
-    return 1
+  if ! gcloud alpha beyondcorp app connections describe "${connection_name}" \
+      --project="${PROJECT_ID}" \
+      --location="${REGION}" &>/dev/null; then
+    if ! yes_no "Connection ${connection_name} was not found. It may have already been deleted, but we can still delete the associated resources created by apps publish."; then
+      return 1
+    fi
   fi
-  fr_name="${connection_name}-psc-fr"
-  ipaddr=$(gcloud compute forwarding-rules describe "${fr_name}" --region="${REGION}" | grep IPAddress | awk '{print $2}')
+
   gcloud compute ssh --command="consul kv delete beyondcorp/port_mapping/\`consul kv get beyondcorp/connection_mapping/${connection_name}\`" nat-vm-"${SUBNET_NAME}" --zone "${REGION}"-a
   gcloud compute ssh --command="consul kv delete beyondcorp/port_mapping/\`consul kv get beyondcorp/connection_mapping/${connection_name}\`" nat-vm-"${SUBNET_NAME}"-ha --zone "${REGION}"-a
   gcloud compute forwarding-rules delete "${connection_name}-xlb-fwdrule" --global
-  if [[ "$frontend_protocol" == "https" ]]; then
-    gcloud compute target-https-proxies delete "${connection_name}-lb" --global
-    gcloud compute ssl-certificates delete "${connection_name}-cert" --global
-  else
-    gcloud compute addresses describe "${connection_name}-xlb-vip" --global &>/dev/null && gcloud compute addresses delete "${connection_name}-xlb-vip" --global
-    gcloud compute target-http-proxies delete "${connection_name}-lb" --global
-  fi
+
+  gcloud_delete_if_found "gcloud compute target-https-proxies" "${connection_name}-lb --global" \
+    "if the frontend protocol of published app was http."
+  gcloud_delete_if_found "gcloud compute ssl-certificates" "${connection_name}-cert --global" \
+    "if the frontend protocol of published app was http."
+  gcloud_delete_if_found "gcloud compute addresses" "${connection_name}-xlb-vip --global" \
+    "if the frontend protocol of published app was https."
+  gcloud_delete_if_found "gcloud compute target-http-proxies" "${connection_name}-lb --global" \
+    "if the frontend protocol of published app was https."
+
   gcloud compute url-maps delete "${connection_name}-map"
   gcloud compute backend-services delete "${connection_name}-be" --global
   gcloud compute health-checks delete "${connection_name}-hc" --global
   iap_oauth_brand=$(gcloud alpha iap oauth-brands list --format="value(name)")
   for i in $(gcloud alpha iap oauth-clients list "$iap_oauth_brand" --filter="displayName=${connection_name}" --format=json | jq -r ".[] | .name"); do
-    gcloud alpha iap oauth-clients delete "$i"
+    gcloud alpha iap oauth-clients delete "${i}"
+  done
+}
+
+apps_list() {
+  check_network
+  local connection_names
+  mapfile -t connection_names < <(gcloud alpha beyondcorp app connections list \
+    --project="${PROJECT_ID}" \
+    --location="${REGION}" | tail -n +2 | awk '{print $1}')
+  for connection_name in "${connection_names[@]}"
+  do
+    local output
+    if output=$(gcloud compute forwarding-rules describe "${connection_name}-xlb-fwdrule" --global 2> /dev/null); then
+      echo "BeyondCorp App Connection Name: ${connection_name}"
+      echo "${output}"
+      echo
+    fi
   done
 }
 
@@ -694,7 +715,7 @@ parse_connections() {
   esac
 }
 
-parse_app() {
+parse_apps() {
   case "${OP}" in
   "publish")
     verify_name
@@ -757,43 +778,57 @@ parse_app() {
     if [[ $frontend_protocol == "http" ]] && [[ -z $ipaddr ]]; then
       info && echo "No IP address provided, one will be provisioned for you dynamically"
     fi
-    publish_app "$NAME" "$frontend_protocol" "$backend_protocol" "$domain" "$ipaddr" "$iap" "$groups" "$users"
+    apps_publish "$NAME" "$frontend_protocol" "$backend_protocol" "$domain" "$ipaddr" "$iap" "$groups" "$users"
     ;;
   "unpublish")
     verify_name
-    while getopts ":f:" o; do
-      case "${o}" in
-      f)
-        if [[ ${OPTARG} != "http" ]] && [[ ${OPTARG} != "https" ]]; then
-          error && echo "-f can only be http or https"
-          exit 1
-        fi
-        local frontend_protocol=${OPTARG}
-        ;;
-      *)
-        error && echo "Unrecognized argument: -${OPTARG}"
-        exit 1
-        ;;
-      esac
-    done
     verify_no_extraneous_arguments "$@"
-    if [[ -z $frontend_protocol ]]; then
-      error && echo "-f must be specified: -f <FRONTEND_PROTOCOL:http|https>"
-      exit 1
-    fi
-    unpublish_app "$NAME" "$frontend_protocol"
+    apps_unpublish "${NAME}"
+    ;;
+  "list")
+    verify_no_name
+    apps_list
     ;;
   "-h" | "--help")
-    usage_app
+    usage_apps
     ;;
   "")
     error && echo "Missing argument: <OPERATION:publish|unpublish>"
-    usage_app
+    usage_apps
     ;;
   *)
     error && echo "Unrecognized argument: ${OP}"
     ;;
   esac
+}
+
+gcloud_delete_if_found() {
+  local surface collection
+  IFS=" " read -r -a surface <<< "${1}"
+  IFS=" " read -r -a collection <<< "${2}"
+  local condition="${3}"
+  info && echo "Not found error is expected for the next deletion ${condition}"
+  if "${surface[@]}" describe "${collection[@]}" 1>/dev/null; then
+    "${surface[@]}" delete "${collection[@]}"
+  fi
+}
+
+yes_no() {
+  local description="${1}"
+  warn && echo "${description}"
+  while true; do
+    read -r -p "Do you want to continue? " yn
+    case "${yn}" in
+      [Yy]*)
+        break
+        ;;
+      [Nn]*)
+        return 1
+        ;;
+      *) echo "Please answer yes or no."
+        ;;
+    esac
+  done
 }
 
 main() {
@@ -810,14 +845,14 @@ main() {
   "connections")
     parse_connections "$@"
     ;;
-  "app")
-    parse_app "$@"
+  "apps")
+    parse_apps "$@"
     ;;
   "-h" | "--help")
     usage
     ;;
   "")
-    error && echo "Missing argument: <RESOURCE:network|connectors|connections|app>"
+    error && echo "Missing argument: <RESOURCE:network|connectors|connections|apps>"
     usage
     ;;
   *)
