@@ -21,7 +21,7 @@ set -euo pipefail
 
 readonly BEYONDCORP_REPOSITORIES='gcr.io/appconnector-external-release'
 readonly REMOTE_AGENT_REPOSITORY="${BEYONDCORP_REPOSITORIES}/appconnector_remote_cp"
-readonly REMOTE_AGENT_TAG='appconnector_remote_cp_20220110_rc00'
+readonly REMOTE_AGENT_TAG='appconnector_remote_cp_20220310_rc00'
 readonly REMOTE_AGENT_INSTALLER_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
 readonly REMOTE_AGENT_RUNNER_TARGET_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
 readonly REMOTE_AGENT_RUNNER_STABLE_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
@@ -84,6 +84,13 @@ install_complete_message() {
 # sudo systemctl start beyondcorp & sudo systemctl enable beyondcorp | start  #
 # sudo systemctl status beyondcorp                                   | status #
 # --------------------------------------------------------------------------- #
+#                                                                             #
+# BeyondCorp utility scripts for verifying Remote Agent environment setup:    #
+# --------------------------------------------------------------------------- #
+# sudo /var/beyondcorp/scripts/run-diagnostics         | General diagnostics  #
+# sudo /var/beyondcorp/scripts/run-pre-install-checks  | Pre-install checks   #
+# sudo /var/beyondcorp/scripts/run-post-install-checks | Post-install checks  #
+# --------------------------------------------------------------------------- #
 ###############################################################################
 EOM
 )"
@@ -132,8 +139,22 @@ check_dependency() {
 
 precondition_checks() {
   title 'Checking dependencies...'
-  check_dependency "docker" "docker version" "Please install Docker Engine on this machine (https://docs.docker.com/engine/install/)."
+  check_dependency "docker" "docker --version" "Please install Docker Engine on this machine (https://docs.docker.com/engine/install/)."
+  # Checking connection to Docker daemon
+  if [[ $(stat -c '%a' /var/run/docker.sock) = 660 ]] && [[ $(stat -c '%U' /var/run/docker.sock) = root ]]; then
+    FATAL "Unable to connect to the Docker daemon socket. Please run command 'sudo chown $USER /var/run/docker.sock' to resolve the issue."
+  fi
   check_dependency "systemctl" "systemctl --version" "Please install systemctl on this machine (https://www.man7.org/linux/man-pages/man1/systemctl.1.html)."
+}
+
+installation_checks() {
+  title 'Checking BeyondCorp Remote Agent environment...'
+  sudo "${BEYONDCORP_DIR}/scripts/run-pre-install-checks"
+}
+
+post_install_checks() {
+  title 'Performing post-installation checks...'
+  sudo "${BEYONDCORP_DIR}/scripts/run-post-install-checks"
 }
 
 # 3. user
@@ -304,5 +325,7 @@ fi
 precondition_checks
 add_user
 install
+installation_checks
 start_service
+post_install_checks
 install_complete_message
