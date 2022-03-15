@@ -21,7 +21,7 @@ set -euo pipefail
 
 readonly BEYONDCORP_REPOSITORIES='gcr.io/appconnector-external-release'
 readonly REMOTE_AGENT_REPOSITORY="${BEYONDCORP_REPOSITORIES}/appconnector_remote_cp"
-readonly REMOTE_AGENT_TAG='appconnector_remote_cp_20220310_rc00'
+readonly REMOTE_AGENT_TAG='appconnector_remote_cp_20220314_rc00'
 readonly REMOTE_AGENT_INSTALLER_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
 readonly REMOTE_AGENT_RUNNER_TARGET_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
 readonly REMOTE_AGENT_RUNNER_STABLE_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
@@ -32,6 +32,7 @@ readonly BEYONDCORP_SERVICE='beyondcorp'
 readonly BEYONDCORP_DIR='/var/beyondcorp'
 
 readonly COLOR_GREEN='\033[32m'
+readonly COLOR_RED='\033[31m'
 readonly COLOR_RESET='\033[0m'
 
 BEYONDCORP_USER='beyondcorp'
@@ -140,21 +141,23 @@ check_dependency() {
 precondition_checks() {
   title 'Checking dependencies...'
   check_dependency "docker" "docker --version" "Please install Docker Engine on this machine (https://docs.docker.com/engine/install/)."
-  # Checking connection to Docker daemon
-  if [[ $(stat -c '%a' /var/run/docker.sock) = 660 ]] && [[ $(stat -c '%U' /var/run/docker.sock) = root ]]; then
-    FATAL "Unable to connect to the Docker daemon socket. Please run command 'sudo chown $USER /var/run/docker.sock' to resolve the issue."
+
+  # Enabling root privileges for the $USER
+  if [[ "${USER}" != 'root' ]] && ! (id -nG "${USER}" | grep -qw "docker") ; then
+    INFO "Appending user '${USER}' to group 'docker'."
+    if ! sudo usermod -aG "docker" "${USER}"; then
+      FATAL "Failed to append user '${USER}' to group 'docker'."
+    fi
+    printf "%b%s%b\n" "${COLOR_RED}" "Updated group membership for '${USER}'. Please log out and log back in for the changes to be re-evaluated and run the installation script again." "${COLOR_RESET}"
+    exit
   fi
+
   check_dependency "systemctl" "systemctl --version" "Please install systemctl on this machine (https://www.man7.org/linux/man-pages/man1/systemctl.1.html)."
 }
 
 installation_checks() {
   title 'Checking BeyondCorp Remote Agent environment...'
   sudo "${BEYONDCORP_DIR}/scripts/run-pre-install-checks"
-}
-
-post_install_checks() {
-  title 'Performing post-installation checks...'
-  sudo "${BEYONDCORP_DIR}/scripts/run-post-install-checks"
 }
 
 # 3. user
@@ -327,5 +330,4 @@ add_user
 install
 installation_checks
 start_service
-post_install_checks
 install_complete_message
