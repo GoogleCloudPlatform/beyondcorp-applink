@@ -21,7 +21,7 @@ set -euo pipefail
 
 readonly BEYONDCORP_REPOSITORIES='gcr.io/appconnector-external-release'
 readonly REMOTE_AGENT_REPOSITORY="${BEYONDCORP_REPOSITORIES}/appconnector_remote_cp"
-readonly REMOTE_AGENT_TAG='appconnector_dp_rollout_20220419_rc00'
+readonly REMOTE_AGENT_TAG='appconnector_dp_rollout_20220601_rc00'
 readonly REMOTE_AGENT_INSTALLER_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
 readonly REMOTE_AGENT_RUNNER_TARGET_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
 readonly REMOTE_AGENT_RUNNER_STABLE_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
@@ -233,6 +233,18 @@ docker_flags=(
   --entrypoint="${REMOTE_AGENT_INSTALLER_ENTRYPOINT}"
 )
 
+clean_up_previous_installations() {
+  WARN 'Any previous installations of the BeyondCorp Remote Agent will be removed.'
+  read -p 'Do you want to continue (y/N)? ' USER_INPUT
+  if [[ "${USER_INPUT}" == [yY] || "${USER_INPUT}" == [yY][eE][sS] ]]; then
+    title 'Cleaning up previous BeyondCorp installations...'
+    ./"${0}" -r
+  else
+    INFO 'Stopping the BeyondCorp Remote Agent installer.'
+    exit 1
+  fi
+}
+
 install() {
   title 'Installing BeyondCorp Remote Agent...'
   installer_flags=(
@@ -326,6 +338,7 @@ if "${UNINSTALL}"; then
   exit 0
 fi
 precondition_checks
+clean_up_previous_installations
 add_user
 install
 installation_checks
