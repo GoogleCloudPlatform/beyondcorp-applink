@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-## Copyright 2021 Google LLC
+## Copyright 2024 Google LLC
 ##
 ## Licensed under the Apache License, Version 2.0 (the "License");
 ## you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ set -euo pipefail
 
 readonly BEYONDCORP_REPOSITORIES='gcr.io/appconnector-external-release'
 readonly REMOTE_AGENT_REPOSITORY="${BEYONDCORP_REPOSITORIES}/appconnector_remote_cp"
-readonly REMOTE_AGENT_TAG='appconnector_dp_rollout_20231220_rc00'
+readonly REMOTE_AGENT_TAG='appconnector_dp_rollout_20240302_rc00'
 readonly REMOTE_AGENT_INSTALLER_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
 readonly REMOTE_AGENT_RUNNER_TARGET_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
 readonly REMOTE_AGENT_RUNNER_STABLE_IMAGE="${REMOTE_AGENT_REPOSITORY}:${REMOTE_AGENT_TAG}"
@@ -180,6 +180,26 @@ add_user() {
       FATAL "Failed to append user '${BEYONDCORP_USER}' to group 'docker'."
     fi
   fi
+
+  INFO "Creating home directory for user '${BEYONDCORP_USER}'."
+  if ! sudo mkhomedir_helper "${BEYONDCORP_USER}"; then
+    FATAL "Failed to create home directory for user '${BEYONDCORP_USER}'."
+  fi
+
+  docker_dir="/home/${BEYONDCORP_USER}/.docker"
+  if sudo test -d "${docker_dir}"; then
+    INFO "Directory '${docker_dir}' already exists. Continue."
+  else
+    INFO "Creating '${docker_dir}' directory."
+    if ! sudo mkdir "${docker_dir}"; then
+      FATAL "Failed to create '${docker_dir}' directory for user '${BEYONDCORP_USER}'."
+    fi
+  fi
+
+  INFO "Updating permissions for '${docker_dir}' directory."
+  if ! sudo chown -R "${BEYONDCORP_USER}:${BEYONDCORP_USER}" "${docker_dir}"; then
+    FATAL "Failed to update permissions for '${docker_dir}' directory."
+  fi
 }
 
 # Before starting the uninstall, find the installed beyondcorp user. It will be
@@ -211,6 +231,11 @@ get_user() {
 }
 
 delete_user() {
+  # Don't delete custom user.
+  if [[ "${installed_beyondcorp_user}" != 'beyondcorp' ]]; then
+    return 0
+  fi
+
   title 'Deleting user...'
   if [[ -z "${installed_beyondcorp_user}" ]]; then
     WARN "Failed to find the installed beyondcorp user. Continue."
@@ -221,7 +246,7 @@ delete_user() {
     return 0
   fi
   INFO "Deleting user '${installed_beyondcorp_user}'."
-  if ! sudo userdel "${installed_beyondcorp_user}"; then
+  if ! sudo userdel -r "${installed_beyondcorp_user}"; then
     WARN "Failed to delete user '${installed_beyondcorp_user}'. Continue."
   fi
 }
@@ -245,6 +270,87 @@ clean_up_previous_installations() {
   fi
 }
 
+set_docker_proxy() {
+  set +u
+  title 'Checking proxy settings...'
+
+  if [[ -z "${NO_PROXY}" && -z "${no_proxy}" && -z "${HTTP_PROXY}" && \
+        -z "${http_proxy}" && -z "${HTTPS_PROXY}" && -z "${https_proxy}"  ]]; then
+    INFO 'No proxy settings detected. Continue.'
+    set -u
+    return 0
+  elif [[ (-n "${http_proxy}" || -n "${HTTP_PROXY}") && -z "${HTTPS_PROXY}" && -z "${https_proxy}" ]]; then
+    FATAL 'HTTP proxy is set but HTTPS proxy is not. Please set both HTTP and HTTPS proxies. Stopping the BeyondCorp Remote Agent installer.'
+  elif [[ (-n "${https_proxy}" || -n "${HTTPS_PROXY}") && -z "${HTTP_PROXY}" && -z "${http_proxy}" ]]; then
+    FATAL 'HTTPS proxy is set but HTTP proxy is not. Please set both HTTP and HTTPS proxies. Stopping the BeyondCorp Remote Agent installer.'
+  fi
+
+  if [[ -n "${HTTPS_PROXY}" && ! "${HTTPS_PROXY}" =~ ^http:// ]]; then
+    FATAL 'Only the http:// schema is supported for BeyondCorp proxies. Please use the http:// schema. Stopping the BeyondCorp Remote Agent installer.'
+  elif [[ -n "${https_proxy}" && ! "${https_proxy}" =~ ^http:// ]]; then
+    FATAL 'Only the http:// schema is supported for BeyondCorp proxies. Please use the http:// schema. Stopping the BeyondCorp Remote Agent installer.'
+  fi
+
+  docker_config_file="/home/${BEYONDCORP_USER}/.docker/config.json"
+
+  # Let the user set docker proxy config if we are not using the default
+  # beyondcorp user.
+  if [[ "${BEYONDCORP_USER}" != 'beyondcorp' ]]; then
+    WARN "Proxy settings detected and using '${BEYONDCORP_USER}' as beyondcorp_user."
+    read -p "Please confirm that '${docker_config_file}' is updated with proxy settings. See https://docs.docker.com/network/proxy/#configure-the-docker-client for details. (y/N)" USER_INPUT
+    if [[ "${USER_INPUT}" == [yY] || "${USER_INPUT}" == [yY][eE][sS] ]]; then
+      INFO "User confirmed '${docker_config_file}' is updated with proxy settings."
+      set -u
+      return 0
+    else
+      INFO "Please update '${docker_config_file}' with proxy settings. Stopping the BeyondCorp Remote Agent installer."
+      exit 1
+    fi
+  fi
+
+  INFO "Proxy settings detected, creating '${docker_config_file}'"
+
+  proxies=()
+
+  if [[ -n "${HTTP_PROXY}" ]]; then
+    proxies+=("   \"httpProxy\": \"${HTTP_PROXY}\"")
+  elif [[ -n "${http_proxy}" ]]; then
+    proxies+=("   \"httpProxy\": \"${http_proxy}\"")
+  fi
+
+  if [[ -n "${HTTPS_PROXY}" ]]; then
+    proxies+=("   \"httpsProxy\": \"${HTTPS_PROXY}\"")
+  elif [[ -n "${https_proxy}" ]]; then
+    proxies+=("   \"httpsProxy\": \"${https_proxy}\"")
+  fi
+
+  if [[ -n "${NO_PROXY}" ]]; then
+    proxies+=("   \"noProxy\": \"${NO_PROXY}\"")
+  elif [[ -n "${no_proxy}" ]]; then
+    proxies+=("   \"noProxy\": \"${no_proxy}\"")
+  fi
+
+  printf -v default_proxies '%s,\n' "${proxies[@]}"
+  default_proxies="${default_proxies%,$'\n'}"
+
+  sudo dd of="${docker_config_file}" << EOF
+{
+"proxies": {
+  "default": {
+${default_proxies}
+  }
+ }
+}
+EOF
+
+  INFO "Updating permissions for '${docker_config_file}'."
+  if ! sudo chown "${BEYONDCORP_USER}:${BEYONDCORP_USER}" "${docker_config_file}"; then
+    FATAL "Failed to update permissions for '${docker_config_file}'"
+  fi
+
+  set -u
+}
+
 install() {
   title 'Installing BeyondCorp Remote Agent...'
   installer_flags=(
@@ -259,7 +365,7 @@ install() {
   # Pull before run. Otherwise, docker reuse the local one with the same tag
   # which may not be the version we want.
   docker pull "${REMOTE_AGENT_INSTALLER_IMAGE}"
-  if ! docker run --rm "${docker_flags[@]}" "${REMOTE_AGENT_INSTALLER_IMAGE}" "${installer_flags[@]}"; then
+  if ! sudo -u "${BEYONDCORP_USER}" docker run --rm "${docker_flags[@]}" "${REMOTE_AGENT_INSTALLER_IMAGE}" "${installer_flags[@]}"; then
     FATAL "Failed to install BeyondCorp Remote Agent."
   fi
   # Remove the installer.
@@ -340,6 +446,7 @@ fi
 precondition_checks
 clean_up_previous_installations
 add_user
+set_docker_proxy
 install
 installation_checks
 start_service
